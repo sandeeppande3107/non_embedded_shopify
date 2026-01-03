@@ -1,0 +1,11 @@
+{
+  "name": "customer-portal-extension",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "@shopify/customer-account-ui-extensions-react": "^0.0.65"
+  },
+  "scripts": {
+    "build": "echo 'Extension build placeholder'"
+  }
+}

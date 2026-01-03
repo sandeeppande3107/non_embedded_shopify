@@ -1,0 +1,19 @@
+
+name = "Unified Non Embedded App"
+client_id = "1135bdc0bbf54314787254ec4bb0fe8b"
+application_url = "https://localhost:3000"
+embedded = false
+
+[auth]
+redirect_urls = ["https://localhost:3000/api/auth/callback"]
+
+[access_scopes]
+scopes = "write_app_proxy,read_customers,read_orders,read_products,write_products,write_purchase_options,write_draft_orders,write_customers,write_orders,read_own_subscription_contracts,write_own_subscription_contracts"
+
+[app_proxy]
+url = "https://easter-extract-pen-acid.trycloudflare.com"
+prefix = "apps"
+subpath = "customer-dashboard"
+
+[webhooks]
+api_version = "2025-07"

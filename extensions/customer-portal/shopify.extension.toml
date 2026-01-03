@@ -1,0 +1,10 @@
+name = "customer-portal"
+uid = "1394a431-4663-d0ee-17c3-448fe106c4f5a514f9b0"
+type = "ui_extension"
+handle = "customer-portal"
+api_version = "2025-07"
+
+targeting = [
+  { target = "customer-account.order.action.render", module = "./assets/main.jsx" },
+  { target = "customer-account.order.action.menu-item.render", module = "./assets/main.jsx" }
+]
