@@ -1,11 +1,11 @@
-import crypto from 'crypto';
+import crypto from "crypto";
 
 export default function handler(req, res) {
-  console.log('req.query', req.query);
+  console.log("req.query", req.query);
   const shop = req.query.shop;
-  if (!shop) return res.status(400).send('Missing shop parameter');
+  if (!shop) return res.status(400).send("Missing shop parameter");
 
-  const state = crypto.randomBytes(12).toString('hex');
+  const state = crypto.randomBytes(12).toString("hex");
   const redirectUri = `${process.env.APP_URL}/api/auth/callback`;
 
   const url =

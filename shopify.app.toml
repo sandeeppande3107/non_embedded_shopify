@@ -1,17 +1,17 @@
 
 name = "Unified Non Embedded App"
 client_id = "1135bdc0bbf54314787254ec4bb0fe8b"
-application_url = "https://localhost:3000"
+application_url = "http://localhost:3000/install"
 embedded = false
 
 [auth]
-redirect_urls = ["https://localhost:3000/api/auth/callback"]
+redirect_urls = ["https://localhost:3000/api/auth/callback","http://localhost:4016/dev/stores/shopify/install", "http://localhost:3000/shopify/callback"]
 
 [access_scopes]
-scopes = "write_app_proxy,read_customers,read_orders,read_products,write_products,write_purchase_options,write_draft_orders,write_customers,write_orders,read_own_subscription_contracts,write_own_subscription_contracts"
+scopes = "write_app_proxy,read_customers,read_orders,read_products,write_products,write_purchase_options,write_draft_orders,write_customers,write_orders,read_own_subscription_contracts,write_own_subscription_contracts,read_themes"
 
 [app_proxy]
-url = "https://easter-extract-pen-acid.trycloudflare.com"
+url = "https://then-above-response-tools.trycloudflare.com"
 prefix = "apps"
 subpath = "customer-dashboard"
 
