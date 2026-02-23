@@ -1,0 +1,257 @@
+{% comment %}
+  ============================================================
+  Dynamic Hero Banner — Theme App Extension Block
+  ============================================================
+  Merchants add this via the theme editor → Add block → Apps.
+  Works on any page: home, product, collection, landing pages.
+
+  API URL (set in theme editor settings):
+    /apps/customer-dashboard/api/hero
+
+  Shopify proxies that storefront URL to your Next.js app at:
+    /api/hero
+
+  EXPECTED API RESPONSE (JSON):
+    {
+      "title":    "Summer Collection 2026",
+      "subtitle": "Discover our freshest arrivals.",
+      "cta_text": "Shop Now",
+      "cta_url":  "/collections/all",
+      "bg_color": "#1a1a2e"   (optional — overrides theme setting)
+    }
+  ============================================================
+{% endcomment %}
+
+{%- liquid
+  assign block_id   = 'dhb-' | append: block.id
+  assign api_url    = block.settings.api_url
+  assign text_color = block.settings.text_color
+  assign bg_color   = block.settings.bg_color
+-%}
+
+<div
+  id="{{ block_id }}"
+  class="dhb-wrapper"
+  data-api-url="{{ api_url | escape }}"
+  data-fallback-title="{{ block.settings.fallback_title | escape }}"
+  data-fallback-subtitle="{{ block.settings.fallback_subtitle | escape }}"
+  data-fallback-cta-text="{{ block.settings.fallback_cta_text | escape }}"
+  data-fallback-cta-url="{{ block.settings.fallback_cta_url | escape }}"
+  style="
+    background-color: {{ bg_color }};
+    min-height: {{ block.settings.min_height }}px;
+    padding: 60px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-family: inherit;
+  "
+  {{ block.shopify_attributes }}
+>
+  <!-- Loading -->
+  <div class="dhb-loading" aria-live="polite">
+    <span class="dhb-spinner"></span>
+    <p style="color: rgba(255,255,255,0.7); margin: 8px 0 0;">Loading&hellip;</p>
+  </div>
+
+  <!-- Content (populated by JS) -->
+  <div class="dhb-content" hidden style="max-width:720px; display:flex; flex-direction:column; align-items:center; gap:20px;">
+    <h2 class="dhb-title" style="
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      font-weight: 700;
+      line-height: 1.1;
+      color: {{ text_color }};
+      margin: 0;
+    "></h2>
+    <p class="dhb-subtitle" style="
+      font-size: clamp(1rem, 2vw, 1.25rem);
+      line-height: 1.6;
+      color: {{ text_color }};
+      opacity: 0.85;
+      margin: 0;
+    "></p>
+    <a class="dhb-cta" href="#" style="
+      display: inline-block;
+      padding: 14px 36px;
+      border-radius: 4px;
+      background-color: {{ block.settings.cta_bg_color }};
+      color: {{ block.settings.cta_text_color }};
+      font-weight: 600;
+      font-size: 1rem;
+      text-decoration: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    "></a>
+  </div>
+
+  <!-- Error state -->
+  <div class="dhb-error" hidden style="color:#ffcccc; font-size:0.95rem;">
+    <p>⚠️ Could not load banner content.</p>
+  </div>
+</div>
+
+<style>
+  #{{ block_id }} .dhb-spinner {
+    display: block;
+    width: 36px;
+    height: 36px;
+    border: 3px solid rgba(255,255,255,0.2);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: dhb-spin-{{ block_id }} 0.7s linear infinite;
+    margin: 0 auto;
+  }
+  @keyframes dhb-spin-{{ block_id }} {
+    to { transform: rotate(360deg); }
+  }
+  #{{ block_id }} .dhb-cta:hover {
+    opacity: 0.88;
+    transform: translateY(-2px);
+  }
+</style>
+
+<script>
+(function () {
+  var root     = document.getElementById('{{ block_id }}');
+  if (!root) return;
+
+  var apiUrl     = root.dataset.apiUrl;
+  var loading    = root.querySelector('.dhb-loading');
+  var content    = root.querySelector('.dhb-content');
+  var errorEl    = root.querySelector('.dhb-error');
+  var titleEl    = root.querySelector('.dhb-title');
+  var subtitleEl = root.querySelector('.dhb-subtitle');
+  var ctaEl      = root.querySelector('.dhb-cta');
+
+  function render(data) {
+    titleEl.textContent    = data.title    || root.dataset.fallbackTitle;
+    subtitleEl.textContent = data.subtitle || root.dataset.fallbackSubtitle;
+    ctaEl.textContent      = data.cta_text || root.dataset.fallbackCtaText;
+    ctaEl.href             = data.cta_url  || root.dataset.fallbackCtaUrl || '#';
+
+    if (data.bg_color) root.style.backgroundColor = data.bg_color;
+
+    loading.hidden = true;
+    content.hidden = false;
+  }
+
+  function showFallback() {
+    var t = root.dataset.fallbackTitle;
+    var s = root.dataset.fallbackSubtitle;
+    if (!t && !s) {
+      loading.hidden = true;
+      errorEl.hidden = false;
+      return;
+    }
+    render({
+      title:    t,
+      subtitle: s,
+      cta_text: root.dataset.fallbackCtaText,
+      cta_url:  root.dataset.fallbackCtaUrl,
+    });
+  }
+
+  if (!apiUrl) { showFallback(); return; }
+
+  var fetchOptions = { method: 'GET', headers: { 'Accept': 'application/json' } };
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+    fetchOptions.signal = AbortSignal.timeout(8000);
+  }
+
+  fetch(apiUrl, fetchOptions)
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .then(render)
+    .catch(function (err) {
+      console.warn('[DynamicHeroBanner] API error:', err.message);
+      showFallback();
+    });
+})();
+</script>
+
+{% schema %}
+{
+  "name": "Dynamic Hero Banner",
+  "target": "section",
+  "settings": [
+    {
+      "type": "header",
+      "content": "API"
+    },
+    {
+      "type": "text",
+      "id": "api_url",
+      "label": "API Endpoint URL",
+      "default": "/apps/customer-dashboard/api/hero",
+      "info": "Uses the App Proxy — Shopify forwards this to your Next.js /api/hero handler. Must return JSON with title, subtitle, cta_text, cta_url."
+    },
+    {
+      "type": "header",
+      "content": "Fallback Content"
+    },
+    {
+      "type": "text",
+      "id": "fallback_title",
+      "label": "Fallback Title",
+      "default": "Welcome to Our Store"
+    },
+    {
+      "type": "textarea",
+      "id": "fallback_subtitle",
+      "label": "Fallback Subtitle",
+      "default": "Discover amazing products curated just for you."
+    },
+    {
+      "type": "text",
+      "id": "fallback_cta_text",
+      "label": "Fallback CTA Label",
+      "default": "Shop Now"
+    },
+    {
+      "type": "text",
+      "id": "fallback_cta_url",
+      "label": "Fallback CTA URL",
+      "default": "/collections/all"
+    },
+    {
+      "type": "header",
+      "content": "Appearance"
+    },
+    {
+      "type": "color",
+      "id": "bg_color",
+      "label": "Background Color",
+      "default": "#1a1a2e"
+    },
+    {
+      "type": "color",
+      "id": "text_color",
+      "label": "Text Color",
+      "default": "#ffffff"
+    },
+    {
+      "type": "color",
+      "id": "cta_bg_color",
+      "label": "CTA Button Color",
+      "default": "#e94560"
+    },
+    {
+      "type": "color",
+      "id": "cta_text_color",
+      "label": "CTA Button Text Color",
+      "default": "#ffffff"
+    },
+    {
+      "type": "range",
+      "id": "min_height",
+      "label": "Minimum Height (px)",
+      "min": 200,
+      "max": 800,
+      "step": 20,
+      "default": 420
+    }
+  ]
+}
+{% endschema %}
