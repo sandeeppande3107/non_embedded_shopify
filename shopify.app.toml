@@ -1,5 +1,5 @@
 
-name = "Unified Non Embedded App"
+name = "WinePik"
 client_id = "1135bdc0bbf54314787254ec4bb0fe8b"
 application_url = "http://localhost:3000/install"
 embedded = false
