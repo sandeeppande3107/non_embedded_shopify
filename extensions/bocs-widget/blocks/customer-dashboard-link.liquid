@@ -1,0 +1,178 @@
+{% comment %}
+  ============================================================
+  Customer Dashboard Link — Theme App Extension Block
+  ============================================================
+  Add this block to the customers/account template via the
+  theme editor to show a "Manage Subscriptions" card on the
+  legacy customer accounts page.
+  ============================================================
+{% endcomment %}
+
+{%- liquid
+  assign block_id = 'cdl-' | append: block.id
+-%}
+
+<div
+  id="{{ block_id }}"
+  style="padding: {{ block.settings.padding }}px 0; font-family: {{ block.settings.font_family }};"
+  {{ block.shopify_attributes }}
+>
+  <div class="cdl-card">
+    <div class="cdl-card__body">
+      <p class="cdl-label">{{ block.settings.label }}</p>
+      <p class="cdl-desc">{{ block.settings.description }}</p>
+      <a
+        href="{{ block.settings.dashboard_url }}"
+        class="cdl-btn"
+      >
+        {{ block.settings.button_text }} &rsaquo;
+      </a>
+    </div>
+  </div>
+</div>
+
+<style>
+  #{{ block_id }} * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  #{{ block_id }} .cdl-card {
+    border: 1px solid {{ block.settings.border_color }};
+    background: {{ block.settings.bg_color }};
+    padding: 24px 28px;
+    font-family: {{ block.settings.font_family }};
+  }
+
+  #{{ block_id }} .cdl-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: {{ block.settings.muted_color }};
+    margin-bottom: 6px;
+  }
+
+  #{{ block_id }} .cdl-desc {
+    font-size: 0.875rem;
+    color: {{ block.settings.muted_color }};
+    font-style: italic;
+    line-height: 1.5;
+    margin-bottom: 18px;
+  }
+
+  #{{ block_id }} .cdl-btn {
+    display: inline-block;
+    padding: 10px 24px;
+    background: {{ block.settings.btn_bg_color }};
+    color: {{ block.settings.btn_text_color }};
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    text-decoration: none;
+    font-family: {{ block.settings.font_family }};
+    transition: opacity 0.2s ease;
+  }
+
+  #{{ block_id }} .cdl-btn:hover {
+    opacity: 0.85;
+  }
+</style>
+
+{% schema %}
+{
+  "name": "Customer Dashboard Link",
+  "target": "section",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Link"
+    },
+    {
+      "type": "text",
+      "id": "dashboard_url",
+      "label": "Dashboard URL",
+      "default": "/apps/customer-dashboard",
+      "info": "The URL customers are sent to when they click the button."
+    },
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "type": "text",
+      "id": "label",
+      "label": "Eyebrow Label",
+      "default": "Manage Subscriptions"
+    },
+    {
+      "type": "text",
+      "id": "description",
+      "label": "Description",
+      "default": "View and manage your subscription boxes, delivery frequency, and billing."
+    },
+    {
+      "type": "text",
+      "id": "button_text",
+      "label": "Button Text",
+      "default": "Open Customer Dashboard"
+    },
+    {
+      "type": "header",
+      "content": "Appearance"
+    },
+    {
+      "type": "select",
+      "id": "font_family",
+      "label": "Font Family",
+      "options": [
+        { "value": "Georgia, 'Times New Roman', serif", "label": "Serif (Georgia)" },
+        { "value": "inherit", "label": "Theme default" },
+        { "value": "'Helvetica Neue', Arial, sans-serif", "label": "Sans-serif" }
+      ],
+      "default": "Georgia, 'Times New Roman', serif"
+    },
+    {
+      "type": "color",
+      "id": "bg_color",
+      "label": "Background",
+      "default": "#f5f0ea"
+    },
+    {
+      "type": "color",
+      "id": "border_color",
+      "label": "Border",
+      "default": "#e0d8cc"
+    },
+    {
+      "type": "color",
+      "id": "muted_color",
+      "label": "Text Color",
+      "default": "#777777"
+    },
+    {
+      "type": "color",
+      "id": "btn_bg_color",
+      "label": "Button Background",
+      "default": "#5c4a3a"
+    },
+    {
+      "type": "color",
+      "id": "btn_text_color",
+      "label": "Button Text",
+      "default": "#ffffff"
+    },
+    {
+      "type": "range",
+      "id": "padding",
+      "label": "Vertical Padding (px)",
+      "min": 0,
+      "max": 80,
+      "step": 4,
+      "default": 16
+    }
+  ]
+}
+{% endschema %}

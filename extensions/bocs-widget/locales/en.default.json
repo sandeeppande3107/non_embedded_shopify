@@ -1,0 +1,85 @@
+{
+  "blocks": {
+    "bocs_widget": {
+      "name": "BOCS Widget",
+      "settings": {
+        "api_url": {
+          "label": "API Endpoint URL",
+          "info": "Shopify proxies this storefront URL to your Next.js /customer-portal/store/bocs handler. Query params (shop, signature, timestamp) are auto-injected by Shopify."
+        },
+        "section_title": {
+          "label": "Section Heading"
+        },
+        "section_subtitle": {
+          "label": "Section Subheading"
+        },
+        "font_family": {
+          "label": "Font Family",
+          "options__1": {
+            "label": "Serif (Georgia)"
+          },
+          "options__2": {
+            "label": "Theme default"
+          },
+          "options__3": {
+            "label": "Sans-serif"
+          }
+        },
+        "bg_color": {
+          "label": "Section Background"
+        },
+        "card_bg_color": {
+          "label": "Card Background"
+        },
+        "selected_bg_color": {
+          "label": "Card Hover Background"
+        },
+        "border_color": {
+          "label": "Divider / Border Color"
+        },
+        "text_color": {
+          "label": "Primary Text Color"
+        },
+        "muted_color": {
+          "label": "Muted Text Color"
+        },
+        "accent_color": {
+          "label": "Accent Color (savings, italic)"
+        },
+        "btn_bg_color": {
+          "label": "Button Background"
+        },
+        "btn_text_color": {
+          "label": "Button Text Color"
+        },
+        "section_padding": {
+          "label": "Section Vertical Padding (px)"
+        }
+      }
+    },
+    "customer_dashboard_link": {
+      "name": "Customer Dashboard Link",
+      "settings": {
+        "dashboard_url": {
+          "label": "Dashboard URL",
+          "info": "The URL customers are sent to when they click the button."
+        },
+        "label": { "label": "Eyebrow Label" },
+        "description": { "label": "Description" },
+        "button_text": { "label": "Button Text" },
+        "font_family": {
+          "label": "Font Family",
+          "options__1": { "label": "Serif (Georgia)" },
+          "options__2": { "label": "Theme default" },
+          "options__3": { "label": "Sans-serif" }
+        },
+        "bg_color": { "label": "Background" },
+        "border_color": { "label": "Border" },
+        "muted_color": { "label": "Text Color" },
+        "btn_bg_color": { "label": "Button Background" },
+        "btn_text_color": { "label": "Button Text" },
+        "padding": { "label": "Vertical Padding (px)" }
+      }
+    }
+  }
+}

@@ -6,5 +6,6 @@ api_version = "2025-07"
 
 targeting = [
   { target = "customer-account.order.action.render", module = "./assets/main.jsx" },
-  { target = "customer-account.order.action.menu-item.render", module = "./assets/main.jsx" }
+  { target = "customer-account.order.action.menu-item.render", module = "./assets/main.jsx" },
+  { target = "customer-account.profile.block.render", module = "./assets/main.jsx" }
 ]
