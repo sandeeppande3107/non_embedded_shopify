@@ -24,3 +24,7 @@ This repository contains:
 # non_embedded_shopify
 
 cloudflared tunnel --url http://localhost:3005
+npx shopify app dev --store dev-migration-test-2.myshopify.com
+npx shopify app dev --store dev-store-749237498237498330.myshopify.com
+
+npx shopify app webhook trigger

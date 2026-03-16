@@ -1,13 +1,36 @@
 {% comment %}
   ============================================================
-  BOCS Widget — Theme App Extension Block
+  BOCS Widget v2 — Theme App Extension Block
   ============================================================
-  Fetches data[0] from /apps/customer-dashboard/api/customer-portal/store/bocs
-  (Shopify auto-injects shop, signature, timestamp query params)
+  Multi-step subscription wizard OR single-page layout.
+  Controlled by bocs.flow.layoutMode ('wizard' | 'single').
 
-  Subscribe CTA posts to:
-    POST /apps/customer-dashboard/api/customer-portal/store/checkout
-    Body: { items: [{ variantId, sellingPlanId, quantity }] }
+  Wizard mode: Pack → Frequency → Products → Subscribe
+    - Progress indicator (step-bar-labels, dots, fraction, none)
+    - Transitions: slide-horizontal, slide-vertical, fade, instant
+
+  CSS from backend (all 5 sources; block id is applied at runtime, API never sends it):
+    1. Progress Bar CSS
+       State: flow.progressBarCss
+       Scaffold: .widget-progress-bar { }, .widget-progress-bar .step-dot { }, etc.
+    2. Step CSS (one per step, steps 1–4)
+       State: flow.stepContent[n].css
+       Scaffold: .step--pack-size { }, .step--frequency { }, .step--products { }, .step--review { }
+       Note: Widget currently renders steps 1–3 only; step 4 CSS is injected for when review step exists.
+    3. Inline CSS
+       State: theming.customCss
+       Used when: theming.customStyleMode === 'inline'
+    4. External Stylesheet URL
+       State: theming.customCssUrl
+       Used when: theming.customStyleMode === 'external' (injected as <link>)
+    5. Card CSS (one per frequency, within each pack size)
+       State: packSizes[x].frequencies[y].cardCss
+       Scaffold: .freq-card--{frequency-name-lowercase} { }
+
+  Theming:
+    - CSS variables from bocs.theming.colors
+
+  Checkout: POST { items: [{ variantId, sellingPlanId, quantity }] }
   ============================================================
 {% endcomment %}
 
@@ -24,7 +47,7 @@
   data-checkout-url="{{ checkout_url | escape }}"
   {{ block.shopify_attributes }}
 >
-  <!-- Loading state -->
+  <!-- Loading -->
   <div class="bocs-loading">
     <div class="bocs-spinner-wrap">
       <svg class="bocs-spinner" viewBox="0 0 50 50" xmlns="http://www.w3.org/2000/svg">
@@ -44,736 +67,1335 @@
     </div>
   </div>
 
-  <!-- Main content (populated by JS) -->
+  <!-- Main content -->
   <div class="bocs-content" hidden></div>
 
-  <!-- Error state -->
+  <!-- Empty state (no BOCS from API) -->
+  <div class="bocs-empty" hidden>
+    <div class="bocs-empty__icon" aria-hidden="true">📦</div>
+    <h3 class="bocs-empty__title">No subscription available for now</h3>
+    <p class="bocs-empty__text">We don’t have any subscription boxes set up at the moment. Check back later or browse our regular products.</p>
+  </div>
+
+  <!-- Error (Ah Snap) -->
   <div class="bocs-error" hidden>
-    <p class="bocs-error__msg">⚠️ Could not load subscription box. Please try again later.</p>
+    <div class="bocs-error__icon" aria-hidden="true">😵</div>
+    <h3 class="bocs-error__title">Ah snap!</h3>
+    <p class="bocs-error__msg">Something went wrong loading your subscription options. Please refresh the page or try again in a few minutes.</p>
   </div>
 </div>
 
 <style>
-  /* ── Reset ───────────────────────────────────────────────────────── */
+  /* ── Reset ────────────────────────────────────────────────────────── */
   #{{ block_id }} *, #{{ block_id }} *::before, #{{ block_id }} *::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
+    box-sizing: border-box; margin: 0; padding: 0;
   }
 
-  /* ── Root ────────────────────────────────────────────────────────── */
+  /* ── Root / CSS Variables (theme-friendly: override via theming or inherit) ── */
   #{{ block_id }} {
-    --bg:       #f5f0ea;
-    --card:     #f5f0ea;
-    --hover:    #e8dfd0;
-    --border:   #e0d8cc;
-    --dark:     #4a4a4a;
-    --text:     #3d3d3d;
-    --muted:    #777777;
-    --accent:   #c67a2e;
-    --btn:      #5c4a3a;
+    --bg:       #ffffff;
+    --card:     #ffffff;
+    --hover:    rgba(0,0,0,0.06);
+    --border:   rgba(0,0,0,0.12);
+    --dark:     #000000;
+    --text:     #000000;
+    --muted:    #666666;
+    --accent:   currentColor;
+    --btn:      #000000;
     --btn-text: #ffffff;
+    --success:  #15803d;
+    --error:    #b91c1c;
+    --radius:   0px;
+    --shadow:   none;
+    --border-w: 1px;
+    font-family: var(--font-body-family, inherit);
     background: var(--bg);
-    font-family: Georgia, 'Times New Roman', serif;
     color: var(--text);
+    overflow: hidden;
   }
 
-  /* ── Spinner ─────────────────────────────────────────────────────── */
-  @keyframes bocs-spin {
-    0%   { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-
-  @keyframes bocs-dash {
+  /* ── Spinner ──────────────────────────────────────────────────────── */
+  @keyframes bocs-spin  { 100% { transform: rotate(360deg); } }
+  @keyframes bocs-dash  {
     0%   { stroke-dasharray: 1 200; stroke-dashoffset: 0; }
     50%  { stroke-dasharray: 90 200; stroke-dashoffset: -35; }
     100% { stroke-dasharray: 90 200; stroke-dashoffset: -124; }
   }
-
-  #{{ block_id }} .bocs-spinner-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 24px 20px;
-    gap: 14px;
-  }
-
-  #{{ block_id }} .bocs-spinner {
-    width: 48px;
-    height: 48px;
-    animation: bocs-spin 2s linear infinite;
-  }
-
-  #{{ block_id }} .bocs-spinner__track {
-    stroke: var(--border);
-  }
-
-  #{{ block_id }} .bocs-spinner__arc {
-    stroke: var(--btn);
-    animation: bocs-dash 1.5s ease-in-out infinite;
-  }
-
-  #{{ block_id }} .bocs-loading__label {
-    font-size: 0.8rem;
-    color: var(--muted);
-    font-style: italic;
-    letter-spacing: 0.03em;
-  }
-
-  /* ── Skeleton ────────────────────────────────────────────────────── */
   @keyframes bocs-shimmer {
     0%   { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
 
+  #{{ block_id }} .bocs-spinner-wrap {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 40px 24px 20px; gap: 14px;
+  }
+  #{{ block_id }} .bocs-spinner { width: 48px; height: 48px; animation: bocs-spin 2s linear infinite; }
+  #{{ block_id }} .bocs-spinner__track { stroke: var(--border); }
+  #{{ block_id }} .bocs-spinner__arc   { stroke: var(--btn); animation: bocs-dash 1.5s ease-in-out infinite; }
+  #{{ block_id }} .bocs-loading__label { font-size: 0.8rem; color: var(--muted); font-style: italic; letter-spacing: 0.03em; }
+
+  /* ── Skeleton ─────────────────────────────────────────────────────── */
   #{{ block_id }} .bocs-sk {
     background: linear-gradient(90deg, var(--border) 25%, var(--hover) 50%, var(--border) 75%);
-    background-size: 200% 100%;
-    animation: bocs-shimmer 1.4s infinite;
+    background-size: 200% 100%; animation: bocs-shimmer 1.4s infinite;
   }
-
   #{{ block_id }} .bocs-sk--hero  { height: 280px; width: 100%; }
   #{{ block_id }} .bocs-sk--title { height: 28px; width: 55%; border-radius: 2px; margin-bottom: 12px; }
   #{{ block_id }} .bocs-sk--text  { height: 16px; width: 80%; border-radius: 2px; margin-bottom: 8px; }
-  #{{ block_id }} .bocs-sk-body   {}
 
-  /* ── Hero image ──────────────────────────────────────────────────── */
+  /* ── Hero ─────────────────────────────────────────────────────────── */
   #{{ block_id }} .bocs-hero {
-    width: 100%;
-    height: clamp(200px, 35vw, 340px);
-    object-fit: cover;
-    display: block;
+    width: 100%; height: clamp(180px, 30vw, 320px);
+    object-fit: cover; display: block;
   }
-
   #{{ block_id }} .bocs-hero--placeholder {
-    width: 100%;
-    height: clamp(200px, 35vw, 340px);
-    background: var(--hover);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 4rem;
+    width: 100%; height: clamp(180px, 30vw, 320px);
+    background: var(--hover); display: flex; align-items: center;
+    justify-content: center; font-size: 4rem;
   }
 
-  /* ── Sections ────────────────────────────────────────────────────── */
-  #{{ block_id }} .bocs-section {
-    padding: 28px 24px;
-    border-bottom: 1px solid var(--border);
+  /* ── Intro (wine details — centre aligned) ────────────────────────── */
+  #{{ block_id }} .bocs-intro {
+    padding: 20px 24px; border-bottom: var(--border-w) solid var(--border);
+    background: var(--card); text-align: center;
   }
-
-  #{{ block_id }} .bocs-section:last-child { border-bottom: none; }
-
-  /* ── BOCS header ─────────────────────────────────────────────────── */
-  #{{ block_id }} .bocs-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 8px;
-  }
-
+  #{{ block_id }} .bocs-header { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
   #{{ block_id }} .bocs-name {
-    font-size: clamp(1.2rem, 3vw, 1.6rem);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    line-height: 1.15;
-    color: var(--text);
+    font-size: clamp(1.1rem, 3vw, 1.5rem); font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em; line-height: 1.15; color: var(--text);
   }
-
   #{{ block_id }} .bocs-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 9px;
-    font-size: 0.65rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    border-radius: 3px;
-    background: rgba(22,163,74,0.12);
-    color: #166534;
-    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px;
+    font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+    border-radius: var(--radius); background: var(--hover); color: var(--success); white-space: nowrap;
   }
+  #{{ block_id }} .bocs-tagline { font-size: 0.82rem; color: var(--accent); font-style: italic; margin-bottom: 4px; }
+  #{{ block_id }} .bocs-desc { font-size: 0.85rem; color: var(--muted); line-height: 1.6; font-style: italic; }
 
-  #{{ block_id }} .bocs-desc {
-    font-size: 0.875rem;
-    color: var(--muted);
-    line-height: 1.6;
-    font-style: italic;
-    margin-top: 6px;
+  /* ── Value Propositions (theme button/primary color, theme button text) ── */
+  /* Value prop: same background as next button, white text */
+  #{{ block_id }} .bocs-value-props {
+    display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; padding: 12px 24px;
+    background: var(--btn); border-bottom: var(--border-w) solid var(--border);
   }
-
-  /* ── Step label ──────────────────────────────────────────────────── */
-  #{{ block_id }} .bocs-step-label {
-    text-align: center;
-    margin-bottom: 20px;
+  #{{ block_id }} .bocs-value-prop {
+    font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+    color: #ffffff; display: flex; align-items: center; gap: 5px;
   }
+  #{{ block_id }} .bocs-value-prop::before { content: '✓'; color: #ffffff; opacity: 0.9; }
 
-  #{{ block_id }} .bocs-step-label h3 {
-    font-size: 0.95rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--text);
-    margin-bottom: 4px;
+  /* ── Progress Bar (wizard) — more spacing between steps ───────────── */
+  #{{ block_id }} .widget-progress-bar {
+    display: flex; align-items: center; justify-content: center;
+    margin: 20px 24px 0; padding: 20px 28px; background: var(--card);
+    border: var(--border-w) solid var(--border); border-radius: var(--radius);
+    gap: 5px;
   }
-
-  #{{ block_id }} .bocs-step-label p {
-    font-size: 0.8rem;
-    color: var(--muted);
-    font-style: italic;
+  @media (min-width: 768px) {
+    #{{ block_id }} .widget-progress-bar { gap: 20px; }
   }
+  #{{ block_id }} .widget-progress-bar .bocs-progress__step {
+    display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative;
+    min-width: 88px;
+  }
+  #{{ block_id }} .widget-progress-bar .step-dot {
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 2px solid var(--border); display: flex; align-items: center; justify-content: center;
+    font-size: 0.72rem; font-weight: 700; background: var(--card); color: var(--muted);
+    transition: all 0.3s ease; cursor: default; user-select: none;
+  }
+  #{{ block_id }} .widget-progress-bar .step-dot.active {
+    background: var(--btn); border-color: var(--btn); color: var(--btn-text);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  #{{ block_id }} .widget-progress-bar .step-dot.done {
+    background: var(--btn); border-color: var(--btn); color: var(--btn-text); opacity: 0.7;
+  }
+  #{{ block_id }} .widget-progress-bar .bocs-progress__label {
+    font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+    white-space: nowrap; line-height: 1;
+  }
+  #{{ block_id }} .widget-progress-bar .bocs-progress__label.active { color: var(--btn); font-weight: 700; }
+  #{{ block_id }} .widget-progress-bar .bocs-progress__summary {
+    font-size: 0.55rem; color: var(--muted); font-style: italic; white-space: nowrap; max-width: 80px;
+    overflow: hidden; text-overflow: ellipsis; text-align: center;
+  }
+  #{{ block_id }} .widget-progress-bar .step-line {
+    flex: 1; height: 1px; background: var(--border); margin: 0 32px;
+    margin-bottom: 18px; min-width: 48px; max-width: 120px; transition: background 0.3s ease;
+  }
+  #{{ block_id }} .widget-progress-bar .step-line.done { background: var(--btn); opacity: 0.7; }
 
-  #{{ block_id }} .bocs-step-divider {
-    width: 48px;
-    height: 1px;
+  /* Progress — dots variant */
+  #{{ block_id }} .widget-progress-bar.is-dots .bocs-progress__step { gap: 0; }
+  #{{ block_id }} .widget-progress-bar.is-dots .step-dot {
+    width: 10px; height: 10px; border-radius: 50%; border: none; font-size: 0;
     background: var(--border);
-    margin: 10px auto 0;
+  }
+  #{{ block_id }} .widget-progress-bar.is-dots .step-dot.active { background: var(--btn); width: 24px; border-radius: 5px; }
+  #{{ block_id }} .widget-progress-bar.is-dots .step-dot.done { background: var(--btn); opacity: 0.5; }
+  #{{ block_id }} .widget-progress-bar.is-dots .step-line { margin: 0 28px; margin-bottom: 0; }
+  #{{ block_id }} .widget-progress-bar.is-dots .bocs-progress__label { display: none; }
+
+  /* Mobile: stepper shows only current step (one by one) */
+  @media (max-width: 767px) {
+    #{{ block_id }} .widget-progress-bar .bocs-progress__step { display: none !important; }
+    #{{ block_id }} .widget-progress-bar .bocs-progress__step.active { display: flex !important; }
+    #{{ block_id }} .widget-progress-bar .step-line { display: none !important; }
   }
 
-  /* ── Products strip ──────────────────────────────────────────────── */
-  #{{ block_id }} .bocs-products {
-    display: flex;
-    gap: 12px;
-    overflow-x: auto;
-    padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+  /* Progress — fraction */
+  #{{ block_id }} .bocs-progress-fraction {
+    padding: 10px 24px; text-align: center; font-size: 0.75rem;
+    color: var(--muted); font-style: italic; border-bottom: var(--border-w) solid var(--border);
+    background: var(--card);
+  }
+  #{{ block_id }} .bocs-progress-fraction strong { color: var(--text); font-style: normal; }
+
+  /* ── Section ──────────────────────────────────────────────────────── */
+  #{{ block_id }} .bocs-section {
+    padding: 24px; border-bottom: var(--border-w) solid var(--border); background: var(--bg);
   }
 
-  #{{ block_id }} .bocs-products::-webkit-scrollbar { display: none; }
-
-  #{{ block_id }} .bocs-product {
-    flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    width: 72px;
+  /* ── Step header ──────────────────────────────────────────────────── */
+  #{{ block_id }} .bocs-step-header { margin-bottom: 20px; }
+  #{{ block_id }} .bocs-step-header__img {
+    width: 100%; height: clamp(160px, 20vw, 240px); object-fit: cover; display: block;
+    margin-bottom: 16px; border-radius: var(--radius);
   }
-
-  #{{ block_id }} .bocs-product__img {
-    width: 64px;
-    height: 64px;
-    object-fit: cover;
-    border: 2px solid var(--border);
-    background: var(--hover);
-    display: block;
+  #{{ block_id }} .bocs-step-header h3 {
+    font-size: clamp(0.9rem, 2.5vw, 1.05rem); font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--text); margin-bottom: 4px;
   }
+  #{{ block_id }} .bocs-step-header p { font-size: 0.8rem; color: var(--muted); font-style: italic; }
 
-  #{{ block_id }} .bocs-product__placeholder {
-    width: 64px;
-    height: 64px;
-    border: 2px solid var(--border);
-    background: var(--hover);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.5rem;
+  /* ── Transitions ──────────────────────────────────────────────────── */
+  #{{ block_id }} .bocs-step-panel { overflow: hidden; }
+
+  @keyframes bocs-slide-from-right { from { transform: translateX(30px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes bocs-slide-from-left  { from { transform: translateX(-30px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes bocs-slide-from-bottom { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  @keyframes bocs-slide-from-top   { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  @keyframes bocs-fade-in          { from { opacity: 0; } to { opacity: 1; } }
+
+  #{{ block_id }} .bocs-trans--slide-h-forward  { animation: bocs-slide-from-right var(--trans-speed, 0.3s) ease; }
+  #{{ block_id }} .bocs-trans--slide-h-backward { animation: bocs-slide-from-left var(--trans-speed, 0.3s) ease; }
+  #{{ block_id }} .bocs-trans--slide-v-forward  { animation: bocs-slide-from-bottom var(--trans-speed, 0.3s) ease; }
+  #{{ block_id }} .bocs-trans--slide-v-backward { animation: bocs-slide-from-top var(--trans-speed, 0.3s) ease; }
+  #{{ block_id }} .bocs-trans--fade             { animation: bocs-fade-in var(--trans-speed, 0.3s) ease; }
+
+  /* ── Pack grid ────────────────────────────────────────────────────── */
+  #{{ block_id }} .bocs-pack-grid {
+    display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 20px;
   }
-
-  #{{ block_id }} .bocs-product__name {
-    font-size: 0.65rem;
-    color: var(--muted);
-    text-align: center;
-    line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    width: 100%;
+  @media (min-width: 768px) {
+    #{{ block_id }} .bocs-pack-grid { grid-template-columns: repeat(2, 1fr); }
   }
-
-  #{{ block_id }} .bocs-product__qty {
-    font-size: 0.6rem;
-    color: var(--accent);
-    font-style: italic;
+  #{{ block_id }} .bocs-pack-card {
+    border: var(--border-w) solid var(--border); cursor: pointer;
+    transition: all 0.25s ease; background: var(--card);
+    position: relative; overflow: hidden; border-radius: var(--radius);
+    box-shadow: var(--shadow);
   }
-
-  /* ── Frequency grid ──────────────────────────────────────────────── */
-  #{{ block_id }} .bocs-freq-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 14px;
-    max-width: 480px;
-    margin: 0 auto;
+  #{{ block_id }} .bocs-pack-card:hover { border-color: var(--dark); }
+  #{{ block_id }} .bocs-pack-card.is-selected { border-color: var(--btn); border-width: 2px; }
+  #{{ block_id }} .bocs-pack-card__img-wrap { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+  #{{ block_id }} .bocs-pack-card__savings--overlay {
+    position: absolute; top: 8px; right: 8px;
+    padding: 4px 10px; background: var(--btn); color: #ffffff;
+    font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    border-radius: var(--radius); z-index: 1;
   }
-
-  @media (min-width: 500px) {
-    #{{ block_id }} .bocs-freq-grid { grid-template-columns: repeat(3, 1fr); }
+  #{{ block_id }} .bocs-pack-card__img-wrap img {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+    transition: transform 0.35s ease;
   }
+  #{{ block_id }} .bocs-pack-card:hover .bocs-pack-card__img-wrap img { transform: scale(1.06); }
+  #{{ block_id }} .bocs-pack-card__img-placeholder {
+    background: var(--hover); display: flex; align-items: center;
+    justify-content: center; font-size: 2.5rem;
+  }
+  #{{ block_id }} .bocs-pack-card__body { padding: 12px; }
+  #{{ block_id }} .bocs-pack-card__qty-badge {
+    font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--accent); font-weight: 700; margin-bottom: 2px;
+  }
+  #{{ block_id }} .bocs-pack-card__name {
+    font-size: 0.82rem; font-weight: 700; color: var(--text); margin-bottom: 4px;
+  }
+  #{{ block_id }} .bocs-pack-card__desc {
+    font-size: 0.68rem; color: var(--muted); font-style: italic;
+    line-height: 1.4; margin-bottom: 6px;
+  }
+  #{{ block_id }} .bocs-pack-card__savings {
+    font-size: 0.65rem; color: var(--accent); font-weight: 600;
+  }
+  #{{ block_id }} .bocs-pack-card__savings--overlay {
+    color: #ffffff !important;
+  }
+  #{{ block_id }} .bocs-pack-card__check {
+    position: absolute; top: 8px; right: 8px; width: 22px; height: 22px;
+    border-radius: 50%; background: var(--btn); color: white;
+    font-size: 0.65rem; display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.2s; box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  }
+  #{{ block_id }} .bocs-pack-card.is-selected .bocs-pack-card__check { opacity: 1; }
 
-  #{{ block_id }} .bocs-freq-option {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 16px 8px;
-    border: 2px solid transparent;
-    cursor: pointer;
-    transition: all 0.25s ease;
-    background: transparent;
-    min-height: 130px;
+  /* ── Frequency list (card grid like product cards) ────────────────── */
+  #{{ block_id }} .bocs-freq-list {
+    display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 20px;
+  }
+  @media (min-width: 768px) {
+    #{{ block_id }} .bocs-freq-list { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (min-width: 992px) {
+    #{{ block_id }} .bocs-freq-list { grid-template-columns: repeat(3, 1fr); }
+  }
+  #{{ block_id }} .bocs-freq-card {
+    border: var(--border-w) solid var(--border); cursor: pointer;
+    transition: all 0.25s ease; overflow: hidden; background: var(--card);
+    border-radius: var(--radius); box-shadow: var(--shadow);
     position: relative;
-    user-select: none;
   }
-
-  #{{ block_id }} .bocs-freq-option:hover {
-    background: rgba(232,223,208,0.4);
-    border-color: var(--border);
+  #{{ block_id }} .bocs-freq-card:hover { border-color: var(--dark); }
+  #{{ block_id }} .bocs-freq-card.is-selected { border-color: var(--btn); border-width: 2px; }
+  #{{ block_id }} .bocs-freq-card__img-wrap { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+  #{{ block_id }} .bocs-freq-card__img-placeholder {
+    background: var(--hover); display: flex; align-items: center; justify-content: center; font-size: 2rem;
   }
-
-  #{{ block_id }} .bocs-freq-option.is-selected {
-    background: var(--hover);
-    border-color: var(--dark);
+  #{{ block_id }} .bocs-freq-card__disc--overlay {
+    position: absolute; top: 8px; right: 8px;
+    display: inline-block; padding: 4px 10px; background: var(--btn); color: var(--btn-text);
+    font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    border-radius: var(--radius); z-index: 1;
   }
-
-  /* Calendar SVG wrapper */
-  #{{ block_id }} .bocs-freq-icon {
-    position: relative;
-    margin-bottom: 10px;
+  #{{ block_id }} .bocs-freq-card__img-wrap img {
+    width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.35s ease;
   }
-
-  #{{ block_id }} .bocs-freq-badge {
-    position: absolute;
-    bottom: -6px;
-    right: -6px;
-    background: var(--btn);
-    color: var(--btn-text);
-    border-radius: 50%;
-    width: 26px;
-    height: 26px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.72rem;
-    font-weight: 700;
-    border: 2px solid var(--bg);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+  #{{ block_id }} .bocs-freq-card:hover .bocs-freq-card__img-wrap img { transform: scale(1.06); }
+  #{{ block_id }} .bocs-freq-card__body { padding: 12px; }
+  #{{ block_id }} .bocs-freq-card__row {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px;
   }
-
-  #{{ block_id }} .bocs-freq-name {
-    font-size: 0.68rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--text);
-    text-align: center;
-    line-height: 1.3;
-    margin-top: 4px;
+  #{{ block_id }} .bocs-freq-card__interval {
+    font-size: 0.82rem; font-weight: 700; color: var(--text);
+    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px;
   }
-
-  #{{ block_id }} .bocs-freq-discount {
-    font-size: 0.65rem;
-    color: var(--accent);
-    font-style: italic;
-    margin-top: 2px;
+  #{{ block_id }} .bocs-freq-card__tagline { font-size: 0.7rem; color: var(--muted); font-style: italic; }
+  #{{ block_id }} .bocs-freq-card__badges { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  #{{ block_id }} .bocs-freq-card__disc {
+    display: inline-block; padding: 2px 8px; background: var(--btn); color: var(--btn-text);
+    font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    border-radius: var(--radius);
   }
+  #{{ block_id }} .bocs-freq-card__best {
+    display: inline-block; padding: 2px 8px; background: var(--hover); color: var(--text);
+    font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    border-radius: var(--radius);
+  }
+  #{{ block_id }} .bocs-freq-card__footer {
+    display: flex; align-items: center; justify-content: flex-end;
+    font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--muted);
+  }
+  #{{ block_id }} .bocs-freq-card.is-selected .bocs-freq-card__footer { color: var(--btn); }
 
-  /* ── Bottom action bar ───────────────────────────────────────────── */
+  /* ── Products grid ────────────────────────────────────────────────── */
+  #{{ block_id }} .bocs-products-grid {
+    display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 20px;
+  }
+  @media (min-width: 768px) {
+    #{{ block_id }} .bocs-products-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (min-width: 992px) {
+    #{{ block_id }} .bocs-products-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  #{{ block_id }} .bocs-product-card {
+    border: var(--border-w) solid var(--border); background: var(--card);
+    overflow: hidden; transition: border-color 0.2s; border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  #{{ block_id }} .bocs-product-card.is-oos { opacity: 0.55; }
+  #{{ block_id }} .bocs-product-card.is-selected { border-color: var(--btn); border-width: 2px; }
+  #{{ block_id }} .bocs-product-card__img-wrap {
+    width: 100%; aspect-ratio: 1; overflow: hidden; background: var(--hover); position: relative;
+  }
+  #{{ block_id }} .bocs-product-card__img-wrap img {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+  }
+  #{{ block_id }} .bocs-product-card__img-overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    justify-content: space-between; padding: 8px; pointer-events: none; z-index: 1;
+  }
+  #{{ block_id }} .bocs-product-card__img-overlay .bocs-product-card__tags {
+    margin-bottom: 0; flex-wrap: wrap;
+  }
+  #{{ block_id }} .bocs-product-card__img-overlay .bocs-product-card__tag {
+    background: rgba(0,0,0,0.6); color: #fff;
+  }
+  #{{ block_id }} .bocs-product-card__oos--overlay {
+    align-self: flex-start; padding: 4px 10px; background: var(--error, #b91c1c);
+    color: #ffffff !important; font-size: 0.62rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; border-radius: var(--radius);
+    z-index: 2; display: inline-block;
+  }
+  #{{ block_id }} .bocs-product-card__img-overlay .bocs-product-card__img-overlay-bottom {
+    display: flex; justify-content: flex-start; align-items: flex-end;
+  }
+  #{{ block_id }} .bocs-product-card__img-placeholder {
+    display: flex; align-items: center; justify-content: center; font-size: 2rem; position: relative;
+  }
+  #{{ block_id }} .bocs-product-card__img-placeholder .bocs-product-card__oos--overlay {
+    position: absolute; bottom: 8px; left: 8px;
+  }
+  #{{ block_id }} .bocs-product-card__body { padding: 10px; }
+  #{{ block_id }} .bocs-product-card__name {
+    font-size: 0.7rem; font-weight: 600; color: var(--text); line-height: 1.3;
+    margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden;
+  }
+  #{{ block_id }} .bocs-product-card__price { font-size: 0.7rem; color: var(--text); font-weight: 700; margin-bottom: 6px; }
+  #{{ block_id }} .bocs-product-card__tags {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;
+  }
+  #{{ block_id }} .bocs-product-card__tag {
+    font-size: 0.58rem; padding: 2px 6px; background: var(--hover); color: var(--text);
+    border-radius: var(--radius); text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  #{{ block_id }} .bocs-product-card__oos  { font-size: 0.62rem; color: var(--error); font-style: italic; }
+  #{{ block_id }} .bocs-product-card__oos--overlay { color: #ffffff !important; }
+  #{{ block_id }} .bocs-product-card__fixed-qty { font-size: 0.65rem; color: var(--muted); font-style: italic; }
+
+  /* ── Qty controls ─────────────────────────────────────────────────── */
+  #{{ block_id }} .bocs-qty-ctrl { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  #{{ block_id }} .bocs-qty-ctrl__btn {
+    width: 26px; height: 26px; border: 1px solid var(--border);
+    background: transparent; color: var(--text); font-size: 1rem;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: all 0.2s; font-family: inherit;
+    border-radius: var(--radius); line-height: 1;
+  }
+  #{{ block_id }} .bocs-qty-ctrl__btn:hover:not(:disabled) { background: var(--hover); border-color: var(--btn); }
+  #{{ block_id }} .bocs-qty-ctrl__btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  #{{ block_id }} .bocs-qty-ctrl__val { min-width: 22px; text-align: center; font-size: 0.85rem; font-weight: 600; color: var(--text); }
+
+  /* ── Selection counter ────────────────────────────────────────────── */
+  #{{ block_id }} .bocs-selection-counter {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: var(--hover); border: 1px solid var(--border);
+    margin-top: 8px; margin-bottom: 16px; font-size: 0.78rem; color: var(--text);
+    border-radius: var(--radius);
+  }
+  #{{ block_id }} .bocs-selection-counter.is-complete { background: var(--hover); border-color: var(--text); }
+  #{{ block_id }} .bocs-counter-hint { color: var(--muted); font-style: italic; }
+  #{{ block_id }} .bocs-counter-done { color: var(--text); font-weight: 700; }
+
+  /* ── Order summary (hidden for now) ───────────────────────────────── */
+  #{{ block_id }} .bocs-order-summary { display: none; }
+
+  /* ── Step nav buttons ─────────────────────────────────────────────── */
+  #{{ block_id }} .bocs-step-nav {
+    display: flex; align-items: center; justify-content: space-between; padding-top: 16px;
+  }
+  #{{ block_id }} .bocs-btn {
+    display: inline-flex; align-items: center; gap: 6px; height: 42px; padding: 0 20px;
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    border: none; cursor: pointer; font-family: inherit; transition: all 0.2s; white-space: nowrap;
+    border-radius: var(--radius);
+  }
+  #{{ block_id }} .bocs-btn svg { flex-shrink: 0; }
+  #{{ block_id }} .bocs-btn--next { background: var(--btn); color: var(--btn-text); }
+  #{{ block_id }} .bocs-btn--next:hover { background: var(--dark); }
+  #{{ block_id }} .bocs-btn--back {
+    background: transparent; color: var(--text); border: 1px solid var(--border);
+  }
+  #{{ block_id }} .bocs-btn--back:hover { background: var(--hover); border-color: var(--dark); }
+
+  /* ── Sticky action bar ────────────────────────────────────────────── */
   #{{ block_id }} .bocs-bar {
-    position: sticky;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: white;
-    border-top: 1px solid var(--border);
-    padding: 14px 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    z-index: 10;
-    box-shadow: 0 -4px 20px rgba(0,0,0,0.06);
+    position: sticky; bottom: 0; background: var(--card);
+    border-top: var(--border-w) solid var(--border); padding: 12px 20px;
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    z-index: 20; box-shadow: 0 -4px 20px rgba(0,0,0,0.07);
   }
-
-  #{{ block_id }} .bocs-bar__info {
-    font-size: 0.8rem;
-    color: var(--muted);
-    font-style: italic;
-    line-height: 1.4;
-  }
-
-  #{{ block_id }} .bocs-bar__info strong {
-    color: var(--text);
-    font-style: normal;
-  }
-
+  #{{ block_id }} .bocs-bar__info { font-size: 0.75rem; color: var(--muted); font-style: italic; line-height: 1.4; }
+  #{{ block_id }} .bocs-bar__info strong { color: var(--text); font-style: normal; }
   #{{ block_id }} .bocs-subscribe {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 44px;
-    padding: 0 28px;
-    background: var(--btn);
-    color: var(--btn-text);
-    font-size: 0.72rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    border: none;
-    border-radius: 0;
-    cursor: pointer;
-    font-family: inherit;
-    white-space: nowrap;
-    transition: background 0.2s ease;
-    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 6px; height: 44px; padding: 0 28px;
+    background: var(--btn); color: var(--btn-text); font-size: 0.7rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.1em; border: none; cursor: pointer;
+    font-family: inherit; white-space: nowrap; transition: background 0.2s;
+    border-radius: var(--radius); flex-shrink: 0;
+  }
+  #{{ block_id }} .bocs-subscribe:hover    { background: var(--dark); }
+  #{{ block_id }} .bocs-subscribe:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── Single layout frequency section ─────────────────────────────── */
+  #{{ block_id }} .bocs-section--hidden { display: none; }
+
+  /* ── Empty state (no BOCS) ─────────────────────────────────────────── */
+  #{{ block_id }} .bocs-empty {
+    padding: 48px 24px; text-align: center; max-width: 360px; margin: 0 auto;
+    background: linear-gradient(180deg, var(--hover) 0%, transparent 100%);
+    border: var(--border-w) solid var(--border); border-radius: var(--radius);
+  }
+  #{{ block_id }} .bocs-empty__icon {
+    font-size: 3rem; line-height: 1; margin-bottom: 16px; opacity: 0.85;
+  }
+  #{{ block_id }} .bocs-empty__title {
+    font-size: 1.15rem; font-weight: 700; color: var(--text); margin-bottom: 10px; letter-spacing: 0.02em;
+  }
+  #{{ block_id }} .bocs-empty__text {
+    font-size: 0.9rem; color: var(--muted); line-height: 1.55;
   }
 
-  #{{ block_id }} .bocs-subscribe:hover  { background: var(--dark); }
-  #{{ block_id }} .bocs-subscribe:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  /* ── Error ───────────────────────────────────────────────────────── */
+  /* ── Error (Ah Snap) + Toast ─────────────────────────────────────────── */
   #{{ block_id }} .bocs-error {
-    padding: 24px;
-    text-align: center;
+    padding: 40px 24px; text-align: center; max-width: 360px; margin: 0 auto;
+    background: linear-gradient(180deg, rgba(200,80,80,0.08) 0%, transparent 100%);
+    border: var(--border-w) solid rgba(180,60,60,0.35); border-radius: var(--radius);
   }
-
+  #{{ block_id }} .bocs-error__icon { font-size: 2.5rem; line-height: 1; margin-bottom: 12px; }
+  #{{ block_id }} .bocs-error__title {
+    font-size: 1.25rem; font-weight: 800; color: var(--text); margin-bottom: 10px; letter-spacing: 0.02em;
+  }
   #{{ block_id }} .bocs-error__msg {
-    font-size: 0.875rem;
-    color: #b91c1c;
-    background: #fef2f2;
-    border: 1px solid #fecaca;
-    padding: 14px 18px;
-    display: inline-block;
+    font-size: 0.9rem; color: var(--muted); line-height: 1.55;
   }
-
-  /* ── Toast ───────────────────────────────────────────────────────── */
   #{{ block_id }} .bocs-toast {
-    position: fixed;
-    bottom: 80px;
-    left: 50%;
+    position: fixed; bottom: 80px; left: 50%;
     transform: translateX(-50%) translateY(20px);
-    background: var(--text);
-    color: white;
-    padding: 10px 20px;
-    font-size: 0.8rem;
-    font-family: inherit;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s ease, transform 0.3s ease;
-    white-space: nowrap;
-    z-index: 999;
+    background: var(--text); color: white; padding: 10px 20px;
+    font-size: 0.8rem; font-family: inherit; opacity: 0;
+    pointer-events: none; transition: opacity 0.3s ease, transform 0.3s ease;
+    white-space: nowrap; z-index: 999; border-radius: var(--radius);
   }
-
-  #{{ block_id }} .bocs-toast.is-visible {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
+  #{{ block_id }} .bocs-toast.is-visible { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 
 <script>
 (function () {
+  'use strict';
+
   var root        = document.getElementById('{{ block_id }}');
   if (!root) return;
 
-  var apiUrl      = root.dataset.apiUrl;
   var checkoutUrl = root.dataset.checkoutUrl;
   var loadingEl   = root.querySelector('.bocs-loading');
   var contentEl   = root.querySelector('.bocs-content');
+  var emptyEl     = root.querySelector('.bocs-empty');
   var errorEl     = root.querySelector('.bocs-error');
+  var blockId     = '{{ block_id }}';
 
-  var selectedFreqIndex = 0; // default: first adjustment
-  var currentBocs       = null;
+  // ── State ─────────────────────────────────────────────────────────
+  var state = {
+    step:             1,       // wizard steps: 1=pack, 2=freq, 3=products
+    packIndex:        0,
+    freqIndex:        0,
+    navigatingForward: true,
+    selectedProducts: {}       // { productId: quantity } — custom boxes only
+  };
 
-  // ── SVG helpers ───────────────────────────────────────────────────
-  var BOTTLE_PATH = 'M4.5 0h3a.5.5 0 01.5.5v3.5c0 1.5 1.5 2 2.5 3v12a1 1 0 01-1 1H2.5a1 1 0 01-1-1V7c1-1 2.5-1.5 2.5-3V.5a.5.5 0 01.5-.5z';
+  var bocs = null;
 
-  function calendarSVG() {
-    return '<svg viewBox="0 0 80 80" width="60" height="60" fill="none">'
-      + '<rect x="10" y="15" width="60" height="50" stroke="#c4b8a8" stroke-width="2" fill="transparent"/>'
-      + '<circle cx="20" cy="15" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="32" cy="15" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="44" cy="15" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="56" cy="15" r="2" fill="#c4b8a8"/>'
-      + '<line x1="10" y1="26" x2="70" y2="26" stroke="#c4b8a8" stroke-width="1.5"/>'
-      + '<circle cx="22" cy="36" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="34" cy="36" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="46" cy="36" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="58" cy="36" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="22" cy="47" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="34" cy="47" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="46" cy="47" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="58" cy="47" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="22" cy="58" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="34" cy="58" r="2" fill="#c4b8a8"/>'
-      + '<circle cx="46" cy="58" r="2" fill="#c4b8a8"/>'
-      + '</svg>';
+  // ── Mock Data ─────────────────────────────────────────────────────
+  var MOCK_BOCS = {"name":"My Wine Club","description":"My Wine Club Description","type":"fixed","sku":"","range":[3,6],"tags":[],"images":[],"categories":[],"storeTheme":{"id":"169340076055","name":"test-data"},"storeTemplate":{"id":"d5ff7a19-28af-40f0-b262-7f29d5c1c1fb","name":"Subscription Frequency Template"},"basics":{"urlSlug":"my-wine-club","boxType":"curated","availability":"all","tagline":"Hand picked wines","imageUrl":"https://res.cloudinary.com/bocsimages/image/upload/v1772438097/bocs/dev/a5df36f5e5872f9a17cfb974d929f8d3.webp"},"packSizes":[{"id":"jk1d1jc","displayLabel":"Six Pack","title":"New Pack Size","quantity":"6","min":6,"max":6,"collectionId":"","collectionName":"Curated Selection (6 bottles)","productCount":6,"packImageUrl":"https://res.cloudinary.com/bocsimages/image/upload/v1772438092/bocs/dev/6697a6924e8b310a23d3798a5531e98b.jpg","packDescription":"Pack description 6","products":[{"id":"df1ea1ef-2559-4035-9a98-3c9bc6da5d90","externalSourceId":"7871990267927","variantId":"43137297383447","name":"icy shadow","price":10,"regularPrice":10,"sku":"","imageUrl":null,"inStock":false,"stockQuantity":-2,"quantity":1},{"id":"3a1c5b42-04cf-4f38-9f5a-95a4467fe18f","externalSourceId":"7870859771927","variantId":"43136082247703","name":"Selling Plans Ski Wax","price":24.95,"regularPrice":24.95,"sku":"","imageUrl":"https://cdn.shopify.com/s/files/1/0768/0783/1575/files/snowboard_wax.png?v=1757499980","inStock":true,"stockQuantity":7,"quantity":1},{"id":"0dd2577a-efbc-4945-a085-daa9132e94d9","externalSourceId":"7870859673623","variantId":"43136081920023","name":"The Archived Snowboard","price":629.95,"regularPrice":629.95,"sku":"","imageUrl":"https://cdn.shopify.com/s/files/1/0768/0783/1575/files/Main_52f8e304-92d9-4a36-82af-50df8fe31c69.jpg?v=1757499979","inStock":true,"stockQuantity":50,"quantity":1},{"id":"2027f237-6e96-4e24-8209-7693ecebf16f","externalSourceId":"7870859739159","variantId":"43136081952791","name":"The Collection Snowboard: Hydrogen","price":600,"regularPrice":600,"sku":"","imageUrl":"https://cdn.shopify.com/s/files/1/0768/0783/1575/files/Main_0a40b01b-5021-48c1-80d1-aa8ab4876d3d.jpg?v=1757499980","inStock":true,"stockQuantity":50,"quantity":1},{"id":"a576a56d-9695-4a0b-963c-a2c373722bb5","externalSourceId":"7870860165143","variantId":"43136082608151","name":"The 3p Fulfilled Snowboard","price":2629.95,"regularPrice":2629.95,"sku":"","imageUrl":"https://cdn.shopify.com/s/files/1/0768/0783/1575/files/Main_b9e0da7f-db89-4d41-83f0-7f417b02831d.jpg?v=1757499980","inStock":true,"stockQuantity":19,"quantity":1},{"id":"92089bf8-c750-472e-ace8-eb34e2d2a1f4","externalSourceId":"7871990956055","variantId":"43137298071575","name":"empty butterfly","price":0,"regularPrice":0,"sku":"","imageUrl":null,"inStock":false,"stockQuantity":0,"quantity":1}],"frequencies":[{"id":"hv916ar","name":"Month","interval":"Every 1 month","intervalUnit":"Month","intervalValue":1,"discount":"15","discountType":"percentage","loyaltyTier":"None","adHocDiscount":"0","pausedDiscount":"0","billingAnchor":"Signup date","minCommitment":"3","editCutoff":"5","cardTagline":"Card Tag","ctaText":"CTA text 1 month","cardCss":"color: #b22222 !important; border-color: #b22222 !important; border-width: 2px !important;","cardImageUrl":"https://res.cloudinary.com/bocsimages/image/upload/v1772438100/bocs/dev/a5e7d8f01af55caf47f65dd903e2c519.jpg","sellingPlanId":"10888019991"},{"id":"freq-dup-o48bmmc","name":"Month","interval":"Every 2 months","intervalUnit":"Month","intervalValue":2,"discount":"10","discountType":"percentage","loyaltyTier":"None","adHocDiscount":"0","pausedDiscount":"0","billingAnchor":"Signup date","minCommitment":"3","editCutoff":"5","cardTagline":"Card Tag","ctaText":"CTA text 2 month","cardCss":"color: #228b22 !important; border-color: #228b22 !important; border-width: 2px !important;","cardImageUrl":"https://res.cloudinary.com/bocsimages/image/upload/v1772438100/bocs/dev/a5e7d8f01af55caf47f65dd903e2c519.jpg","sellingPlanId":"10888052759"}]},{"id":"eqpxn3b","displayLabel":"Three Pack","title":"New Pack Size - Copy","quantity":"3","min":3,"max":3,"collectionId":"","collectionName":"Curated Selection (3 bottles)","productCount":3,"packImageUrl":"https://res.cloudinary.com/bocsimages/image/upload/v1772438092/bocs/dev/6697a6924e8b310a23d3798a5531e98b.jpg","packDescription":"Pack description 3","products":[{"id":"df1ea1ef-2559-4035-9a98-3c9bc6da5d90","externalSourceId":"7871990267927","variantId":"43137297383447","name":"icy shadow","price":10,"regularPrice":10,"sku":"","imageUrl":null,"inStock":false,"stockQuantity":-2,"quantity":1},{"id":"3a1c5b42-04cf-4f38-9f5a-95a4467fe18f","externalSourceId":"7870859771927","variantId":"43136082247703","name":"Selling Plans Ski Wax","price":24.95,"regularPrice":24.95,"sku":"","imageUrl":"https://cdn.shopify.com/s/files/1/0768/0783/1575/files/snowboard_wax.png?v=1757499980","inStock":true,"stockQuantity":7,"quantity":1},{"id":"0dd2577a-efbc-4945-a085-daa9132e94d9","externalSourceId":"7870859673623","variantId":"43136081920023","name":"The Archived Snowboard","price":629.95,"regularPrice":629.95,"sku":"","imageUrl":"https://cdn.shopify.com/s/files/1/0768/0783/1575/files/Main_52f8e304-92d9-4a36-82af-50df8fe31c69.jpg?v=1757499979","inStock":true,"stockQuantity":50,"quantity":1}],"frequencies":[{"id":"freq-dup-wax5eno","name":"Month","interval":"Every 1 month","intervalUnit":"Month","intervalValue":1,"discount":"15","discountType":"percentage","loyaltyTier":"None","adHocDiscount":"0","pausedDiscount":"0","billingAnchor":"Signup date","minCommitment":"3","editCutoff":"5","cardTagline":"Card Tag","ctaText":"CTA text 1 month","cardCss":"color: #b22222 !important; border-color: #b22222 !important; border-width: 2px !important;","cardImageUrl":"https://res.cloudinary.com/bocsimages/image/upload/v1772438100/bocs/dev/a5e7d8f01af55caf47f65dd903e2c519.jpg","sellingPlanId":"10888085527"},{"id":"freq-dup-f688013","name":"Month","interval":"Every 2 months","intervalUnit":"Month","intervalValue":2,"discount":"10","discountType":"percentage","loyaltyTier":"None","adHocDiscount":"0","pausedDiscount":"0","billingAnchor":"Signup date","minCommitment":"3","editCutoff":"5","cardTagline":"Card Tag","ctaText":"CTA text 2 month","cardCss":"color: #228b22 !important; border-color: #228b22 !important; border-width: 2px !important;","cardImageUrl":"https://res.cloudinary.com/bocsimages/image/upload/v1772438100/bocs/dev/a5e7d8f01af55caf47f65dd903e2c519.jpg","sellingPlanId":"10888118295"}]}],"membership":{"eligibleProducts":"wine-only","discountStacking":"best-wins","checkoutMessage":"Wine Club Member ({tier} — {percent}% off)","pausedBehaviour":"reduced"},"flow":{"layoutMode":"wizard","transition":"slide-horizontal","transitionSpeed":"normal","progressIndicator":"step-bar-labels","progressBarOptions":{"showStepLabels":true,"showSummaryValues":true,"showConnectingLines":false,"showRunningTotal":false},"progressBarCss":".widget-progress-bar { border-color: #333; background: #f8f8f8 }\n.widget-progress-bar .step-dot { background: #4a90d9 !important; border-color: #4a90d9 !important; color: #fff !important }\n.widget-progress-bar .step-dot.active { background: #e91e8c !important; border-color: #e91e8c !important; color: #fff !important }\n.widget-progress-bar .step-dot.done { background: #4a90d9 !important; border-color: #4a90d9 !important }\n.widget-progress-bar .step-line { background: #d4c230 !important }\n.widget-progress-bar .step-line.done { background: #4a90d9 !important }\n.widget-progress-bar .bocs-progress__label.active { color: #e91e8c !important }","widgetTitle":"Widget Title","widgetDescription":"Long widget description","valuePropositions":["value prop","value prop"],"headerImageUrl":null,"stepContent":{"1":{"progressLabel":"Choose Pack Size","summaryFormat":"{pack_size}","headingOverride":"How many bottles would you like?","description":"Select your preferred pack size. Larger packs offer better value per bottle.","css":".step--pack-size { color: #0d7d0d !important }","imageUrl":"https://res.cloudinary.com/bocsimages/image/upload/v1772438100/bocs/dev/a5e7d8f01af55caf47f65dd903e2c519.jpg"},"2":{"progressLabel":"Choose Frequency","summaryFormat":"{frequency} chosen","headingOverride":"How often would you like your plan delivered?","description":"Choose your preferred delivery schedule. You can skip, pause or change frequency at any time from your account.","css":".step--frequency { color: #c00 !important; border: 2px solid #c00; border-radius: 8px; padding: 12px }","imageUrl":"https://res.cloudinary.com/bocsimages/image/upload/v1772438100/bocs/dev/a5e7d8f01af55caf47f65dd903e2c519.jpg"},"3":{"progressLabel":"YOUR WINES","summaryFormat":"{count} selected","headingOverride":"Choose your wines","description":"Browse our collection and pick your favourites. We\u2019ll pack them fresh for your next shipment.","css":".step--products { background: #e8f4e8 !important; padding: 12px !important; border-radius: 8px !important; border: 2px solid #0d7d0d }","imageUrl":null},"4":{"progressLabel":"REVIEW","summaryFormat":"{total}","headingOverride":"Review your order","description":"Check your selections, pricing, and frequency before adding to cart.","css":".step--review { border-left: 4px solid var(--btn) }","imageUrl":null}}},"theming":{"colors":{"primary":"#2a82ca","accent":null,"text":null,"background":null},"typography":{"fontSource":"inherit","headingWeight":"600"},"components":{"borderRadius":"0px","buttonStyle":"solid","cardShadow":"none","borderWeight":"1px"},"customStyleMode":"external","customCss":null,"customCssUrl":"https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css","blockSettings":{"productBrowser":{"showPrice":true,"showDiscount":true,"showStock":true,"showTags":true,"enableSearch":true,"enableFilter":true},"frequencyPicker":{"cardStyle":"horizontal","highlightBadge":"best-value","defaultSelection":"best-value-frequency","showSavings":true,"showNextDelivery":true,"showDiscountPct":true,"showTierName":false},"orderSummary":{"style":"inline","ctaButtonText":"Subscribe & Pay","showThumbnails":true,"showLineItemPricing":true,"showTotalSavings":true,"showShippingEstimate":false,"editableQuantities":true,"showNextBillingDate":false},"packSelector":{"style":"cards-with-images","defaultSelection":"middle","showPackImage":true,"showPackDescription":true,"showPriceRange":true,"showTierBadge":true,"showBottleCount":false}}},"priceAdjustment":{"type":"NEW_SALE_PRICE","adjustments":[{"id":"hv916ar","name":"Month","discount":15,"discountType":"percentage","frequency":1,"timeUnit":"Month","price":0,"scheduledPaymentDate":0},{"id":"freq-dup-o48bmmc","name":"Month","discount":10,"discountType":"percentage","frequency":2,"timeUnit":"Month","price":0,"scheduledPaymentDate":0},{"id":"freq-dup-wax5eno","name":"Month","discount":15,"discountType":"percentage","frequency":1,"timeUnit":"Month","price":0,"scheduledPaymentDate":0},{"id":"freq-dup-f688013","name":"Month","discount":10,"discountType":"percentage","frequency":2,"timeUnit":"Month","price":0,"scheduledPaymentDate":0}]},"products":[]};
+
+  // ── Config helpers ─────────────────────────────────────────────────
+  function getFlow()    { return bocs.flow || {}; }
+  function getTheming() { return bocs.theming || {}; }
+  function getBlockSettings() { return getTheming().blockSettings || {}; }
+  function isWizard()   { return (getFlow().layoutMode || 'wizard') === 'wizard'; }
+  function isFixed()    { return bocs.type === 'fixed'; }
+
+  function resolveTransSpeed() {
+    var s = getFlow().transitionSpeed || 'normal';
+    if (s === 'slow')   return 500;
+    if (s === 'normal') return 300;
+    if (s === 'fast')   return 150;
+    var n = parseInt(s);
+    return isNaN(n) ? 300 : n;
   }
 
-  // ── Utilities ─────────────────────────────────────────────────────
-  function freqLabel(adj) {
-    var n    = adj.frequency;
-    var unit = (adj.timeUnit || '').toLowerCase();
-    // Normalise: "months" → "month", "days" → "day"
-    var base = unit.replace(/s$/, '');
-    var display = n === 1
-      ? 'Every ' + n + ' ' + base
-      : 'Every ' + n + ' ' + base + 's';
-    return display;
+  // ── Utilities ──────────────────────────────────────────────────────
+  function esc(str) {
+    return String(str || '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  function getProductImage(product) {
-    if (product.images && product.images.length && product.images[0].url) {
-      return product.images[0].url;
+  // Scope full CSS rules with #blockId so API can send selectors without knowing block id
+  function scopeCssRules(css, scopeId) {
+    var out = [], i = 0, len = (css || '').length;
+    while (i < len) {
+      while (i < len && /[\s\n\r]/.test(css[i])) i++;
+      if (i >= len) break;
+      if (css.substr(i, 2) === '/*') {
+        var end = css.indexOf('*/', i + 2);
+        if (end === -1) break;
+        out.push(css.substring(i, end + 2));
+        i = end + 2;
+        continue;
+      }
+      var selStart = i;
+      var brace = css.indexOf('{', i);
+      if (brace === -1) break;
+      var selector = css.substring(selStart, brace).trim();
+      var depth = 1;
+      i = brace + 1;
+      while (i < len && depth > 0) {
+        if (css[i] === '{') depth++;
+        else if (css[i] === '}') depth--;
+        i++;
+      }
+      var block = css.substring(brace + 1, i - 1);
+      var scopedSel = selector.split(',').map(function(s) {
+        return (scopeId + ' ' + s.trim()).replace(/\s+/g, ' ').trim();
+      }).join(', ');
+      out.push(scopedSel + ' { ' + block + ' }');
     }
-    return null;
+    return out.join('\n');
   }
 
-  function getTotalQty(products) {
-    return (products || []).reduce(function (s, p) { return s + (p.quantity || 1); }, 0);
+  function fmt(n) {
+    var v = parseFloat(n || 0);
+    return v === 0 ? 'Free' : '$' + v.toFixed(2);
   }
 
-  // ── Build UI ──────────────────────────────────────────────────────
-  function render(bocs) {
-    currentBocs = bocs;
-    var products    = bocs.products || [];
-    var adjustments = (bocs.priceAdjustment && bocs.priceAdjustment.adjustments) || [];
-    var bocsImage   = bocs.images && bocs.images.length ? bocs.images[0].url : null;
-    var totalQty    = getTotalQty(products);
+  function maxDiscount(frequencies) {
+    return Math.max.apply(null, (frequencies || []).map(function(f){ return parseFloat(f.discount) || 0; }));
+  }
 
-    var html = '';
+  function bestValueIndex(frequencies) {
+    var max = -1, idx = 0;
+    (frequencies || []).forEach(function(f, i) {
+      var d = parseFloat(f.discount) || 0;
+      if (d > max) { max = d; idx = i; }
+    });
+    return idx;
+  }
 
-    // ── Hero image ─────────────────────────────────────────────────
-    if (bocsImage) {
-      html += '<img class="bocs-hero" src="' + bocsImage + '" alt="' + esc(bocs.name) + '" loading="lazy">';
+  function calcPackSubtotal(pack) {
+    return (pack.products || []).reduce(function(s, p) {
+      return s + (p.price || 0) * (p.quantity || 1);
+    }, 0);
+  }
+
+  function calcCustomSubtotal(pack, sel) {
+    return (pack.products || []).reduce(function(s, p) {
+      return s + (p.price || 0) * (sel[p.id] || 0);
+    }, 0);
+  }
+
+  function applyDiscount(subtotal, freq) {
+    var d = parseFloat(freq && freq.discount || 0) || 0;
+    return subtotal * (1 - d / 100);
+  }
+
+  function totalSelectedQty(sel) {
+    return Object.keys(sel || {}).reduce(function(s, k) { return s + (sel[k] || 0); }, 0);
+  }
+
+  function chevRight() {
+    return '<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>';
+  }
+  function chevLeft() {
+    return '<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4l-6 6 6 6"/></svg>';
+  }
+
+  // ── Theme Application ──────────────────────────────────────────────
+  function applyTheme(b) {
+    var colors = (getTheming()).colors || {};
+    if (colors.primary)    root.style.setProperty('--btn', colors.primary);
+    if (colors.accent)     root.style.setProperty('--accent', colors.accent);
+    if (colors.text)       root.style.setProperty('--text', colors.text);
+    if (colors.background) root.style.setProperty('--bg', colors.background);
+
+    var comp = getTheming().components || {};
+    if (comp.borderRadius) root.style.setProperty('--radius', comp.borderRadius);
+    if (comp.borderWeight) root.style.setProperty('--border-w', comp.borderWeight);
+    var shadowMap = { 'none':'none', 'subtle':'0 1px 4px rgba(0,0,0,0.08)', 'medium':'0 2px 8px rgba(0,0,0,0.12)', 'strong':'0 4px 16px rgba(0,0,0,0.18)' };
+    if (comp.cardShadow && shadowMap[comp.cardShadow]) root.style.setProperty('--shadow', shadowMap[comp.cardShadow]);
+
+    var speed = resolveTransSpeed();
+    root.style.setProperty('--trans-speed', (speed / 1000).toFixed(2) + 's');
+
+    var typo = getTheming().typography || {};
+    if (typo.headingWeight) {
+      root.querySelectorAll('.bocs-name,.bocs-step-header h3,.bocs-pack-card__name,.bocs-freq-card__interval')
+          .forEach(function(el){ el.style.fontWeight = typo.headingWeight; });
+    }
+  }
+
+  // ── Dynamic Style Injection ────────────────────────────────────────
+  function injectDynamicStyles(b) {
+    // External CSS
+    var tm = getTheming();
+    if (tm.customStyleMode === 'external' && tm.customCssUrl) {
+      var linkId = blockId + '-ext';
+      if (!document.getElementById(linkId)) {
+        var lnk = document.createElement('link');
+        lnk.id = linkId; lnk.rel = 'stylesheet'; lnk.href = tm.customCssUrl;
+        document.head.appendChild(lnk);
+      }
+    }
+
+    // Inline CSS
+    if (tm.customStyleMode === 'inline' && tm.customCss) {
+      var inlineId = blockId + '-inline';
+      var inlineEl = document.getElementById(inlineId) || document.createElement('style');
+      inlineEl.id = inlineId; inlineEl.textContent = tm.customCss;
+      if (!document.getElementById(inlineId)) document.head.appendChild(inlineEl);
+    }
+
+    // Scoped dynamic CSS (progress bar + step CSS + card CSS)
+    // Append after block's <style> so overrides win (block style is sibling after root)
+    var sid = blockId + '-dyn';
+    var styleEl = document.getElementById(sid);
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = sid;
+      if (root.parentNode) root.parentNode.appendChild(styleEl);
+      else document.head.appendChild(styleEl);
+    }
+
+    var css = '';
+
+    // Progress bar CSS (scoped by replacing .widget-progress-bar with #id .widget-progress-bar)
+    var pbCss = (getFlow()).progressBarCss || '';
+    if (pbCss.trim()) {
+      css += pbCss.replace(/(\.widget-progress-bar)/g, '#' + blockId + ' $1') + '\n';
+    }
+
+    // Step content CSS: full rules (scope with #blockId) or declarations (wrap in step selector)
+    var sc = (getFlow()).stepContent || {};
+    var scopeId = '#' + blockId;
+    [1,2,3,4].forEach(function(n) {
+      var step = sc[n] || sc[String(n)] || {};
+      var stepCss = step.css && step.css.trim();
+      if (!stepCss || /^\s*\/\*/.test(stepCss)) return;
+      if (stepCss.indexOf('{') !== -1) {
+        css += scopeCssRules(stepCss, scopeId) + '\n';
+      } else {
+        css += scopeId + ' .bocs-step[data-step="' + n + '"] { ' + stepCss + ' }\n';
+      }
+    });
+
+    // Frequency card CSS: full rules (scope with #blockId) or declarations (wrap in card selector)
+    (b.packSizes || []).forEach(function(pack) {
+      (pack.frequencies || []).forEach(function(freq) {
+        var cardCss = freq.cardCss && freq.cardCss.trim();
+        if (!cardCss) return;
+        if (cardCss.indexOf('{') !== -1) {
+          css += scopeCssRules(cardCss, scopeId) + '\n';
+        } else {
+          css += scopeId + ' .bocs-freq-card[data-freq-id="' + freq.id + '"] { ' + cardCss + ' }\n';
+        }
+      });
+    });
+
+    styleEl.textContent = css;
+  }
+
+  // ── Hero section ───────────────────────────────────────────────────
+  function renderHero(b) {
+    var imgUrl  = (b.basics || {}).imageUrl;
+    var tagline = (b.basics || {}).tagline;
+    var flow    = getFlow();
+    var vps     = flow.valuePropositions || [];
+    var html    = '';
+
+    if (imgUrl) {
+      html += '<img class="bocs-hero" src="' + esc(imgUrl) + '" alt="' + esc(b.name) + '" loading="lazy">';
     } else {
       html += '<div class="bocs-hero--placeholder">📦</div>';
     }
 
-    // ── Name + status ──────────────────────────────────────────────
-    html += '<div class="bocs-section">'
-      + '<div class="bocs-header">'
-      + '<h2 class="bocs-name">' + esc(bocs.name) + '</h2>'
-      + '<span class="bocs-badge">● Active</span>'
-      + '</div>';
-    if (bocs.description) {
-      html += '<p class="bocs-desc">' + esc(bocs.description) + '</p>';
+    html += '<div class="bocs-intro">';
+    html += '<div class="bocs-header"><h2 class="bocs-name">' + esc(b.name) + '</h2>'
+          + '<span class="bocs-badge">● Active</span></div>';
+    if (tagline) html += '<p class="bocs-tagline">' + esc(tagline) + '</p>';
+    if (b.description) html += '<p class="bocs-desc">' + esc(b.description) + '</p>';
+    html += '</div>';
+
+    if (vps.length) {
+      html += '<div class="bocs-value-props">';
+      vps.forEach(function(v) { if (v) html += '<span class="bocs-value-prop">' + esc(v) + '</span>'; });
+      html += '</div>';
+    }
+
+    return html;
+  }
+
+  // ── Progress indicator ─────────────────────────────────────────────
+  function renderProgress(b) {
+    var flow      = getFlow();
+    var indicator = flow.progressIndicator || 'step-bar-labels';
+    var opts      = flow.progressBarOptions || {};
+    var sc        = flow.stepContent || {};
+    var pack      = b.packSizes[state.packIndex];
+    var freq      = pack && pack.frequencies[state.freqIndex];
+
+    if (indicator === 'none') return '';
+
+    if (indicator === 'fraction') {
+      return '<div class="bocs-progress-fraction">Step <strong>' + state.step + '</strong> of 3</div>';
+    }
+
+    var isDots   = indicator === 'dots';
+    var labels   = [
+      (sc['1'] || {}).progressLabel || 'Pack Size',
+      (sc['2'] || {}).progressLabel || 'Frequency',
+      (sc['3'] || {}).progressLabel || 'Products'
+    ];
+    var summaries = ['', '', ''];
+    if (opts.showSummaryValues) {
+      summaries[0] = pack ? pack.displayLabel : '';
+      summaries[1] = freq ? freq.interval : '';
+      if (isFixed() && pack) summaries[2] = pack.quantity + ' items';
+    }
+
+    var html = '<div class="widget-progress-bar' + (isDots ? ' is-dots' : '') + '">';
+    for (var i = 0; i < 3; i++) {
+      var cls = i + 1 < state.step ? 'done' : (i + 1 === state.step ? 'active' : '');
+      html += '<div class="bocs-progress__step' + (cls === 'active' ? ' active' : '') + '">'
+        + '<div class="step-dot ' + cls + '">' + (i + 1 < state.step ? '✓' : (isDots ? '' : String(i + 1))) + '</div>';
+      if (!isDots && opts.showStepLabels !== false) {
+        html += '<span class="bocs-progress__label' + (cls === 'active' ? ' active' : '') + '">' + esc(labels[i]) + '</span>';
+      }
+      if (!isDots && summaries[i]) {
+        html += '<span class="bocs-progress__summary">' + esc(summaries[i]) + '</span>';
+      }
+      html += '</div>';
+      if (i < 2) html += '<div class="step-line' + (i + 1 < state.step ? ' done' : '') + '"></div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // ── Step 1: Pack selector ──────────────────────────────────────────
+  function renderStep1(b) {
+    var sc   = (getFlow().stepContent || {})['1'] || {};
+    var ps   = getBlockSettings().packSelector || {};
+    var html = '<div class="bocs-section bocs-step step--pack-size" data-step="1">';
+
+    if (sc.imageUrl) html += '<img class="bocs-step-header__img" src="' + esc(sc.imageUrl) + '" alt="" loading="lazy">';
+    html += '<div class="bocs-step-header"><h3>' + esc(sc.headingOverride || 'Choose Your Pack') + '</h3>'
+          + (sc.description ? '<p>' + esc(sc.description) + '</p>' : '') + '</div>';
+
+    html += '<div class="bocs-pack-grid">';
+    b.packSizes.forEach(function(pack, i) {
+      var isSel  = state.packIndex === i;
+      var maxDis = maxDiscount(pack.frequencies);
+      html += '<div class="bocs-pack-card' + (isSel ? ' is-selected' : '') + '" data-pack-idx="' + i + '">';
+
+      if (ps.showPackImage !== false && pack.packImageUrl) {
+        html += '<div class="bocs-pack-card__img-wrap">';
+        html += '<img src="' + esc(pack.packImageUrl) + '" alt="' + esc(pack.displayLabel) + '" loading="lazy">';
+        if (ps.showPriceRange !== false && maxDis > 0) {
+          html += '<span class="bocs-pack-card__savings bocs-pack-card__savings--overlay">Save up to ' + maxDis + '% off</span>';
+        }
+        html += '</div>';
+      } else {
+        html += '<div class="bocs-pack-card__img-wrap bocs-pack-card__img-placeholder">📦</div>';
+      }
+
+      html += '<div class="bocs-pack-card__body">'
+        + '<div class="bocs-pack-card__qty-badge">' + esc(pack.quantity) + ' bottles</div>'
+        + '<h4 class="bocs-pack-card__name">' + esc(pack.displayLabel) + '</h4>';
+      if (ps.showPackDescription !== false && pack.packDescription) {
+        html += '<p class="bocs-pack-card__desc">' + esc(pack.packDescription) + '</p>';
+      }
+      if (ps.showPriceRange !== false && maxDis > 0 && !(pack.packImageUrl && ps.showPackImage !== false)) {
+        html += '<p class="bocs-pack-card__savings">Save up to ' + maxDis + '% off</p>';
+      }
+      html += '</div>';
+      html += '<div class="bocs-pack-card__check">✓</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+
+    if (isWizard()) {
+      html += '<div class="bocs-step-nav"><span></span>'
+        + '<button class="bocs-btn bocs-btn--next" data-action="next">Next ' + chevRight() + '</button></div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  // ── Step 2: Frequency picker ───────────────────────────────────────
+  function renderStep2(b) {
+    var pack = b.packSizes[state.packIndex];
+    if (!pack) return '';
+    var sc   = (getFlow().stepContent || {})['2'] || {};
+    var fp   = getBlockSettings().frequencyPicker || {};
+    var bvIdx = bestValueIndex(pack.frequencies);
+
+    var html = '<div class="bocs-section bocs-step step--frequency" data-step="2">';
+    if (sc.imageUrl) html += '<img class="bocs-step-header__img" src="' + esc(sc.imageUrl) + '" alt="" loading="lazy">';
+    html += '<div class="bocs-step-header"><h3>' + esc(sc.headingOverride || 'Choose Delivery Frequency') + '</h3>'
+          + (sc.description ? '<p>' + esc(sc.description) + '</p>' : '') + '</div>';
+
+    html += '<div class="bocs-freq-list">';
+    pack.frequencies.forEach(function(freq, i) {
+      var isSel = state.freqIndex === i;
+      var isBV  = (i === bvIdx) && (parseFloat(freq.discount) || 0) > 0;
+      var freqSlug = (freq.name || '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+      var freqCardClasses = 'bocs-freq-card' + (freqSlug ? ' freq-card--' + freqSlug : '') + (isSel ? ' is-selected' : '');
+      html += '<div class="' + freqCardClasses + '"'
+        + ' data-freq-idx="' + i + '" data-freq-id="' + esc(freq.id) + '">';
+
+      if (freq.cardImageUrl) {
+        html += '<div class="bocs-freq-card__img-wrap">';
+        html += '<img src="' + esc(freq.cardImageUrl) + '" alt="' + esc(freq.interval) + '" loading="lazy">';
+        if (fp.showDiscountPct !== false && parseFloat(freq.discount) > 0) {
+          html += '<span class="bocs-freq-card__disc bocs-freq-card__disc--overlay">Save ' + esc(freq.discount) + '%</span>';
+        }
+        html += '</div>';
+      } else {
+        html += '<div class="bocs-freq-card__img-wrap bocs-freq-card__img-placeholder">📅</div>';
+      }
+      html += '<div class="bocs-freq-card__body"><div class="bocs-freq-card__row"><div>'
+        + '<p class="bocs-freq-card__interval">' + esc(freq.interval) + '</p>'
+        + (freq.cardTagline ? '<p class="bocs-freq-card__tagline">' + esc(freq.cardTagline) + '</p>' : '')
+        + '</div><div class="bocs-freq-card__badges">';
+      if (fp.showDiscountPct !== false && parseFloat(freq.discount) > 0 && !freq.cardImageUrl) {
+        html += '<span class="bocs-freq-card__disc">Save ' + esc(freq.discount) + '%</span>';
+      }
+      if (isBV && fp.highlightBadge !== 'none') {
+        var badgeLabel = fp.highlightBadge === 'most-popular' ? 'Most Popular'
+          : fp.highlightBadge === 'recommended' ? 'Recommended' : 'Best Value';
+        html += '<span class="bocs-freq-card__best">' + badgeLabel + '</span>';
+      }
+      html += '</div></div>';
+      html += '<div class="bocs-freq-card__footer">' + (isSel ? '✓ Selected' : 'Select') + '</div>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+
+    if (isWizard()) {
+      html += '<div class="bocs-step-nav">'
+        + '<button class="bocs-btn bocs-btn--back" data-action="back">' + chevLeft() + ' Back</button>'
+        + '<button class="bocs-btn bocs-btn--next" data-action="next">Next ' + chevRight() + '</button></div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  // ── Step 3: Products ───────────────────────────────────────────────
+  function renderStep3(b) {
+    var pack  = b.packSizes[state.packIndex];
+    var freq  = pack && pack.frequencies[state.freqIndex];
+    if (!pack) return '';
+    var sc    = (getFlow().stepContent || {})['3'] || {};
+    var pb    = getBlockSettings().productBrowser || {};
+    var os    = getBlockSettings().orderSummary   || {};
+    var fixed = isFixed();
+
+    var html = '<div class="bocs-section bocs-step step--products" data-step="3">';
+    if (sc.imageUrl) html += '<img class="bocs-step-header__img" src="' + esc(sc.imageUrl) + '" alt="" loading="lazy">';
+
+    var heading = sc.headingOverride || (fixed ? 'Your Selection' : 'Choose Your Items');
+    html += '<div class="bocs-step-header"><h3>' + esc(heading) + '</h3>'
+          + (sc.description ? '<p>' + esc(sc.description) + '</p>' : '');
+
+    if (!fixed) {
+      var totalSel = totalSelectedQty(state.selectedProducts);
+      var maxQty   = pack.max;
+      html += '<div class="bocs-selection-counter' + (totalSel === maxQty ? ' is-complete' : '') + '">'
+        + '<span>' + totalSel + ' / ' + maxQty + ' selected</span>'
+        + (totalSel < maxQty
+            ? '<span class="bocs-counter-hint">Choose ' + (maxQty - totalSel) + ' more</span>'
+            : '<span class="bocs-counter-done">Ready! ✓</span>')
+        + '</div>';
     }
     html += '</div>';
 
-    // ── What's Included ────────────────────────────────────────────
-    if (products.length) {
-      html += '<div class="bocs-section">'
-        + '<div class="bocs-step-label">'
-        + '<h3>What\'s Included</h3>'
-        + '<p>' + totalQty + ' item' + (totalQty !== 1 ? 's' : '') + ' in this box</p>'
-        + '<div class="bocs-step-divider"></div>'
-        + '</div>'
-        + '<div class="bocs-products">';
+    html += '<div class="bocs-products-grid">';
+    (pack.products || []).forEach(function(p) {
+      var qty = fixed ? (p.quantity || 1) : (state.selectedProducts[p.id] || 0);
+      html += '<div class="bocs-product-card' + (!p.inStock ? ' is-oos' : '') + (qty > 0 && !fixed ? ' is-selected' : '') + '">';
 
-      products.forEach(function (p) {
-        var imgUrl = getProductImage(p);
-        html += '<div class="bocs-product">';
-        if (imgUrl) {
-          html += '<img class="bocs-product__img" src="' + imgUrl + '" alt="' + esc(p.name) + '" loading="lazy">';
-        } else {
-          html += '<div class="bocs-product__placeholder">🍷</div>';
-        }
-        html += '<span class="bocs-product__name">' + esc(p.name) + '</span>';
-        if (p.quantity > 1) {
-          html += '<span class="bocs-product__qty">×' + p.quantity + '</span>';
+      if (p.imageUrl) {
+        html += '<div class="bocs-product-card__img-wrap">';
+        html += '<img src="' + esc(p.imageUrl) + '" alt="' + esc(p.name) + '" loading="lazy">';
+        html += '<div class="bocs-product-card__img-overlay">';
+        html += '<div class="bocs-product-card__img-overlay-top">';
+        if (pb.showTags !== false && p.tags && Array.isArray(p.tags) && p.tags.length) {
+          html += '<div class="bocs-product-card__tags">';
+          p.tags.forEach(function(t) { html += '<span class="bocs-product-card__tag">' + esc(t) + '</span>'; });
+          html += '</div>';
         }
         html += '</div>';
-      });
+        html += '<div class="bocs-product-card__img-overlay-bottom">';
+        if (pb.showStock !== false && !p.inStock) {
+          html += '<span class="bocs-product-card__oos bocs-product-card__oos--overlay">Out of stock</span>';
+        }
+        html += '</div></div></div>';
+      } else {
+        html += '<div class="bocs-product-card__img-wrap bocs-product-card__img-placeholder">📦';
+        if (pb.showStock !== false && !p.inStock) {
+          html += '<span class="bocs-product-card__oos bocs-product-card__oos--overlay">Out of stock</span>';
+        }
+        html += '</div>';
+      }
 
-      html += '</div></div>';
-    }
-
-    // ── Frequency selector ─────────────────────────────────────────
-    if (adjustments.length) {
-      html += '<div class="bocs-section" id="' + root.id + '-freq">'
-        + '<div class="bocs-step-label">'
-        + '<h3>Delivery Frequency</h3>'
-        + '<p>How often would you like this delivered?</p>'
-        + '<div class="bocs-step-divider"></div>'
-        + '</div>'
-        + '<div class="bocs-freq-grid">';
-
-      adjustments.forEach(function (adj, i) {
-        var isFirst = (i === 0);
-        html += '<div class="bocs-freq-option' + (isFirst ? ' is-selected' : '') + '" data-freq-idx="' + i + '">'
-          + '<div class="bocs-freq-icon">'
-          + calendarSVG()
-          + '<div class="bocs-freq-badge">' + adj.frequency + '</div>'
-          + '</div>'
-          + '<p class="bocs-freq-name">' + esc(freqLabel(adj)) + '</p>'
-          + (adj.discount > 0 ? '<p class="bocs-freq-discount">Save ' + adj.discount + '%</p>' : '')
+      html += '<div class="bocs-product-card__body"><h5 class="bocs-product-card__name">' + esc(p.name) + '</h5>';
+      if (!p.imageUrl && pb.showTags !== false && p.tags && Array.isArray(p.tags) && p.tags.length) {
+        html += '<div class="bocs-product-card__tags">';
+        p.tags.forEach(function(t) { html += '<span class="bocs-product-card__tag">' + esc(t) + '</span>'; });
+        html += '</div>';
+      }
+      if (pb.showPrice !== false) {
+        var label = p.price > 0 ? fmt(p.price) : 'Free';
+        if (pb.showDiscount !== false && freq && parseFloat(freq.discount) > 0 && p.price > 0) {
+          var discPrice = p.price * (1 - parseFloat(freq.discount) / 100);
+          label = '<s style="opacity:.5">' + fmt(p.price) + '</s> ' + fmt(discPrice);
+        }
+        html += '<p class="bocs-product-card__price">' + label + '</p>';
+      }
+      if (fixed) {
+        html += '<div class="bocs-product-card__fixed-qty">Qty: ' + esc(String(qty)) + '</div>';
+      } else {
+        html += '<div class="bocs-qty-ctrl">'
+          + '<button class="bocs-qty-ctrl__btn" data-action="qty-dec" data-pid="' + esc(p.id) + '"' + (qty <= 0 ? ' disabled' : '') + '>−</button>'
+          + '<span class="bocs-qty-ctrl__val">' + qty + '</span>'
+          + '<button class="bocs-qty-ctrl__btn" data-action="qty-inc" data-pid="' + esc(p.id) + '"' + (!p.inStock || totalSelectedQty(state.selectedProducts) >= pack.max ? ' disabled' : '') + '>+</button>'
           + '</div>';
-      });
-
+      }
       html += '</div></div>';
+    });
+    html += '</div>';
+
+    // Order summary removed for now
+
+    // Step nav / subscribe
+    var canSub = canSubscribe(b);
+    var ctaText = (freq && freq.ctaText) || (os.ctaButtonText) || 'Subscribe Now';
+
+    if (isWizard()) {
+      html += '<div class="bocs-step-nav">'
+        + '<button class="bocs-btn bocs-btn--back" data-action="back">' + chevLeft() + ' Back</button>'
+        + '<button class="bocs-subscribe" data-action="subscribe"' + (canSub ? '' : ' disabled') + '>'
+        + esc(ctaText) + ' ›</button></div>';
     }
 
-    // ── Sticky bar ─────────────────────────────────────────────────
-    var firstAdj = adjustments[0];
-    html += '<div class="bocs-bar">'
-      + '<div class="bocs-bar__info">'
-      + '<strong>' + esc(bocs.name) + '</strong><br>'
-      + (firstAdj ? 'Delivery: <span class="bocs-bar-freq-label">' + esc(freqLabel(firstAdj)) + '</span>' : '')
-      + '</div>'
-      + '<button class="bocs-subscribe">Subscribe Now ›</button>'
-      + '</div>';
+    html += '</div>';
+    return html;
+  }
 
-    // ── Toast ──────────────────────────────────────────────────────
-    html += '<div class="bocs-toast"></div>';
+  // ── Sticky action bar ──────────────────────────────────────────────
+  function renderActionBar(b) {
+    var pack   = b.packSizes[state.packIndex];
+    var freq   = pack && pack.frequencies[state.freqIndex];
+    var os     = getBlockSettings().orderSummary || {};
+    var canSub = canSubscribe(b);
+
+    var info = '';
+    if (pack) info += '<strong>' + esc(pack.displayLabel) + '</strong>';
+    if (freq) info += ' · ' + esc(freq.interval);
+    if (!info) info = '<em>Select your pack to get started</em>';
+
+    var html = '<div class="bocs-bar"><div class="bocs-bar__info">' + info + '</div>';
+
+    if (!isWizard()) {
+      var ctaText = (freq && freq.ctaText) || (os.ctaButtonText) || 'Subscribe Now';
+      html += '<button class="bocs-subscribe" data-action="subscribe"' + (canSub ? '' : ' disabled') + '>'
+        + esc(ctaText) + ' ›</button>';
+    }
+
+    html += '</div><div class="bocs-toast"></div>';
+    return html;
+  }
+
+  // ── canSubscribe check ─────────────────────────────────────────────
+  function canSubscribe(b) {
+    if (state.packIndex < 0 || state.freqIndex < 0) return false;
+    var pack = b.packSizes[state.packIndex];
+    if (!pack) return false;
+    if (!isFixed()) {
+      var total = totalSelectedQty(state.selectedProducts);
+      return total >= pack.min && total <= pack.max;
+    }
+    return true;
+  }
+
+  // ── Full render ────────────────────────────────────────────────────
+  function render(transClass) {
+    var b    = bocs;
+    var html = renderHero(b);
+
+    if (isWizard()) {
+      html += renderProgress(b);
+      html += '<div class="bocs-step-panel' + (transClass ? ' ' + transClass : '') + '">';
+      if (state.step === 1) html += renderStep1(b);
+      else if (state.step === 2) html += renderStep2(b);
+      else if (state.step === 3) html += renderStep3(b);
+      html += '</div>';
+    } else {
+      // Single layout — all sections on one page
+      html += renderStep1(b);
+      html += renderStep2(b);
+      html += renderStep3(b);
+    }
+
+    html += renderActionBar(b);
 
     contentEl.innerHTML = html;
     contentEl.hidden    = false;
 
-    // ── Frequency selection events ─────────────────────────────────
-    var freqOptions = contentEl.querySelectorAll('.bocs-freq-option');
-    freqOptions.forEach(function (el) {
-      el.addEventListener('click', function () {
-        selectedFreqIndex = parseInt(el.dataset.freqIdx, 10);
-        freqOptions.forEach(function (o) { o.classList.remove('is-selected'); });
-        el.classList.add('is-selected');
+    attachEvents();
+    applyTheme(b);
+  }
 
-        // Update bar label
-        var adj = adjustments[selectedFreqIndex];
-        var freqLabelEl = contentEl.querySelector('.bocs-bar-freq-label');
-        if (freqLabelEl && adj) freqLabelEl.textContent = freqLabel(adj);
+  // ── Navigate wizard step ───────────────────────────────────────────
+  function goToStep(newStep, forward) {
+    var transition = (getFlow().transition || 'fade');
+    var speed      = resolveTransSpeed();
+
+    if (transition === 'instant') {
+      state.step = newStep; state.navigatingForward = forward;
+      render();
+      return;
+    }
+
+    var dir = forward ? 'forward' : 'backward';
+    var cls = transition === 'slide-horizontal' ? 'bocs-trans--slide-h-' + dir
+            : transition === 'slide-vertical'   ? 'bocs-trans--slide-v-' + dir
+            : 'bocs-trans--fade';
+
+    // Brief exit fade on panel, then re-render with enter animation
+    var panel = contentEl.querySelector('.bocs-step-panel');
+    if (panel) {
+      panel.style.transition = 'opacity ' + (speed * 0.3 / 1000) + 's ease';
+      panel.style.opacity    = '0';
+      setTimeout(function() {
+        state.step = newStep; state.navigatingForward = forward;
+        render(cls);
+      }, speed * 0.3);
+    } else {
+      state.step = newStep; state.navigatingForward = forward;
+      render(cls);
+    }
+  }
+
+  // ── Event binding ──────────────────────────────────────────────────
+  function attachEvents() {
+    // Pack card click
+    contentEl.querySelectorAll('.bocs-pack-card').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var idx = parseInt(el.dataset.packIdx, 10);
+        if (idx !== state.packIndex) {
+          state.packIndex = idx;
+          state.freqIndex = isFixed() ? 0 : bestValueIndex(bocs.packSizes[idx].frequencies || []);
+          state.selectedProducts = {};
+        }
+        render(isWizard() ? null : null);
       });
     });
 
-    // ── Subscribe button ───────────────────────────────────────────
-    var btn = contentEl.querySelector('.bocs-subscribe');
-    btn.addEventListener('click', function () {
-      var adj = adjustments[selectedFreqIndex];
-      if (!adj) return;
+    // Frequency card click
+    contentEl.querySelectorAll('.bocs-freq-card').forEach(function(el) {
+      el.addEventListener('click', function() {
+        state.freqIndex = parseInt(el.dataset.freqIdx, 10);
+        render();
+      });
+    });
 
-      var sellingPlanId = adj.externalSourceId;
+    // Qty increment
+    contentEl.querySelectorAll('[data-action="qty-inc"]').forEach(function(el) {
+      el.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var pid  = el.dataset.pid;
+        var pack = bocs.packSizes[state.packIndex];
+        if (pack && totalSelectedQty(state.selectedProducts) < pack.max) {
+          state.selectedProducts[pid] = (state.selectedProducts[pid] || 0) + 1;
+          render();
+        }
+      });
+    });
 
-      var items = products
-        .filter(function (p) { return p.variationId || p.externalSourceId; })
-        .map(function (p) {
-          return {
-            variantId:     p.variationId || p.externalSourceId,
-            sellingPlanId: sellingPlanId,
-            quantity:      p.quantity || 1
-          };
+    // Qty decrement
+    contentEl.querySelectorAll('[data-action="qty-dec"]').forEach(function(el) {
+      el.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var pid = el.dataset.pid;
+        if ((state.selectedProducts[pid] || 0) > 0) {
+          state.selectedProducts[pid]--;
+          render();
+        }
+      });
+    });
+
+    // Wizard Next button
+    var nextBtn = contentEl.querySelector('[data-action="next"]');
+    if (nextBtn) {
+      nextBtn.addEventListener('click', function() {
+        if (state.step < 3) goToStep(state.step + 1, true);
+      });
+    }
+
+    // Wizard Back button
+    var backBtn = contentEl.querySelector('[data-action="back"]');
+    if (backBtn) {
+      backBtn.addEventListener('click', function() {
+        if (state.step > 1) goToStep(state.step - 1, false);
+      });
+    }
+
+    // Subscribe
+    contentEl.querySelectorAll('[data-action="subscribe"]').forEach(function(btn) {
+      btn.addEventListener('click', handleSubscribe);
+    });
+  }
+
+  // ── Checkout submission ────────────────────────────────────────────
+  function handleSubscribe() {
+    var pack = bocs.packSizes[state.packIndex];
+    var freq = pack && pack.frequencies[state.freqIndex];
+    if (!pack || !freq || !canSubscribe(bocs)) return;
+
+    var items = [];
+    if (isFixed()) {
+      (pack.products || []).forEach(function(p) {
+        items.push({
+          variantId:     String(p.variantId || p.externalSourceId || ''),
+          sellingPlanId: String(freq.sellingPlanId || ''),
+          quantity:      p.quantity || 1
         });
+      });
+    } else {
+      Object.keys(state.selectedProducts).forEach(function(pid) {
+        var qty = state.selectedProducts[pid];
+        if (qty > 0) {
+          var p = (pack.products || []).filter(function(pr){ return pr.id === pid; })[0];
+          if (p) items.push({
+            variantId:     String(p.variantId || p.externalSourceId || ''),
+            sellingPlanId: String(freq.sellingPlanId || ''),
+            quantity:      qty
+          });
+        }
+      });
+    }
 
-      if (!items.length) {
-        showToast('No valid products to subscribe.');
-        return;
+    if (!items.length) { showToast('No valid products to subscribe.'); return; }
+
+    var btns = contentEl.querySelectorAll('[data-action="subscribe"]');
+    btns.forEach(function(b) {
+      b.disabled = true;
+      b.innerHTML = '<svg style="width:14px;height:14px;animation:bocs-spin 1s linear infinite;vertical-align:middle" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="4"/><circle cx="25" cy="25" r="20" fill="none" stroke="#fff" stroke-width="4" stroke-dasharray="60 200" stroke-linecap="round"/></svg> Processing…';
+    });
+
+    fetch(checkoutUrl, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body:    JSON.stringify({ items: items })
+    })
+    .then(function(res) { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+    .then(function(data) {
+      root.dispatchEvent(new CustomEvent('bocs:subscribed', {
+        bubbles: true,
+        detail:  { bocs: bocs, pack: pack, frequency: freq, items: items, response: data }
+      }));
+      var inner = (data && data.data) || data || {};
+      var url   = inner.checkoutUrl || inner.checkout_url || inner.redirectUrl || inner.url || null;
+      if (typeof data === 'string' && data.indexOf('http') === 0) url = data;
+      if (url) { window.location.href = url; }
+      else {
+        showToast('Subscription started! ✓');
+        btns.forEach(function(b){ b.disabled = false; b.innerHTML = 'Subscribe Now ›'; });
       }
-
-      btn.disabled   = true;
-      btn.innerHTML  = '<svg style="width:16px;height:16px;animation:bocs-spin 1s linear infinite;flex-shrink:0" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="4"/><circle cx="25" cy="25" r="20" fill="none" stroke="#fff" stroke-width="4" stroke-dasharray="60 200" stroke-linecap="round"/></svg> Processing…';
-
-      fetch(checkoutUrl, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body:    JSON.stringify({ items: items })
-      })
-        .then(function (res) {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          return res.json();
-        })
-        .then(function (data) {
-          // Dispatch event so theme/page can hook in
-          root.dispatchEvent(new CustomEvent('bocs:subscribed', {
-            bubbles: true,
-            detail:  { bocs: currentBocs, adjustment: adj, response: data }
-          }));
-
-          // Resolve redirect URL — response shape: { code, message, data: { checkoutUrl } }
-          var redirectUrl = null;
-          if (typeof data === 'string' && data.startsWith('http')) {
-            redirectUrl = data;
-          } else if (data) {
-            var inner = data.data || data;
-            redirectUrl = inner.checkoutUrl
-              || inner.checkout_url
-              || inner.redirectUrl
-              || inner.redirect_url
-              || inner.url
-              || inner.link
-              || null;
-          }
-
-          if (redirectUrl) {
-            window.location.href = redirectUrl;
-          } else {
-            showToast('Subscription started! ✓');
-            btn.disabled  = false;
-            btn.innerHTML = 'Subscribe Now &rsaquo;';
-          }
-        })
-        .catch(function (err) {
-          console.warn('[BocsWidget] Checkout error:', err.message);
-          showToast('Something went wrong. Please try again.');
-          btn.disabled  = false;
-          btn.innerHTML = 'Subscribe Now &rsaquo;';
-        });
+    })
+    .catch(function(err) {
+      console.warn('[BocsWidget] Checkout error:', err.message);
+      showToast('Something went wrong. Please try again.');
+      btns.forEach(function(b){ b.disabled = false; b.innerHTML = 'Subscribe Now ›'; });
     });
   }
 
   function showToast(msg) {
-    var toast = contentEl && contentEl.querySelector('.bocs-toast');
-    if (!toast) return;
-    toast.textContent = msg;
-    toast.classList.add('is-visible');
-    setTimeout(function () { toast.classList.remove('is-visible'); }, 3000);
+    var t = root.querySelector('.bocs-toast');
+    if (!t) return;
+    t.textContent = msg; t.classList.add('is-visible');
+    setTimeout(function() { t.classList.remove('is-visible'); }, 3000);
   }
 
-  function esc(str) {
-    return String(str || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+  // ── Empty state (no BOCS from API) ─────────────────────────────────
+  function showEmpty() {
+    loadingEl.style.display = 'none';
+    if (contentEl) contentEl.hidden = true;
+    if (errorEl) errorEl.hidden = true;
+    if (emptyEl) emptyEl.hidden = false;
   }
 
-  // ── Fetch ─────────────────────────────────────────────────────────
+  // ── Error display (Ah Snap) ─────────────────────────────────────────
   function showError(msg) {
     loadingEl.style.display = 'none';
-    var m = errorEl.querySelector('.bocs-error__msg');
-    if (m) m.textContent = '⚠️ ' + (msg || 'Could not load subscription box.');
-    errorEl.hidden = false;
+    if (contentEl) contentEl.hidden = true;
+    if (emptyEl) emptyEl.hidden = true;
+    var titleEl = errorEl && errorEl.querySelector('.bocs-error__title');
+    var msgEl   = errorEl && errorEl.querySelector('.bocs-error__msg');
+    if (titleEl) titleEl.textContent = 'Ah snap!';
+    if (msgEl)   msgEl.textContent   = msg || 'Something went wrong loading your subscription options. Please refresh the page or try again in a few minutes.';
+    if (errorEl) errorEl.hidden = false;
   }
 
+  // ── Init ───────────────────────────────────────────────────────────
+  function initWidget(data) {
+    if (emptyEl) emptyEl.hidden = true;
+    if (errorEl) errorEl.hidden = true;
+    bocs = data;
+
+    // Resolve defaults from block settings
+    var packSel  = (getBlockSettings().packSelector       || {}).defaultSelection  || 'middle';
+    var freqSel  = (getBlockSettings().frequencyPicker    || {}).defaultSelection  || 'best-value-frequency';
+
+    if (bocs.packSizes && bocs.packSizes.length) {
+      state.packIndex = packSel === 'first'  ? 0
+        : packSel === 'middle' ? Math.floor(bocs.packSizes.length / 2)
+        : 0;
+      // Clamp
+      state.packIndex = Math.min(state.packIndex, bocs.packSizes.length - 1);
+    }
+
+    var pack = bocs.packSizes && bocs.packSizes[state.packIndex];
+    if (pack && pack.frequencies && pack.frequencies.length) {
+      state.freqIndex = freqSel === 'first' ? 0
+        : freqSel === 'best-value-frequency' ? bestValueIndex(pack.frequencies)
+        : 0;
+    }
+
+    injectDynamicStyles(bocs);
+    loadingEl.style.display = 'none';
+    render();
+  }
+
+  // ── Boot: fetch BOCS (Open Search or array), or mock ───────────────
+  var apiUrl = root.dataset.apiUrl;
   if (!apiUrl) {
-    showError('No API URL configured. Set it in the theme editor.');
+    setTimeout(function() { initWidget(MOCK_BOCS); }, 400);
     return;
   }
-
-  var opts = { method: 'GET', headers: { Accept: 'application/json' } };
-  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-    opts.signal = AbortSignal.timeout(10000);
-  }
-
-  fetch(apiUrl, opts)
-    .then(function (res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.json();
-    })
-    .then(function (json) {
-      // Accept { data: [...] } or [...] — always take first item
-      var list = Array.isArray(json)      ? json
-               : Array.isArray(json.data) ? json.data
-               : json.data                ? [json.data]
-               : [];
-
-      loadingEl.style.display = 'none';
-
-      if (!list.length) {
-        showError('No subscription box available yet.');
-        return;
+  fetch(apiUrl, { method: 'GET', headers: { Accept: 'application/json' } })
+    .then(function(res) { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+    .then(function(json) {
+      var list = [];
+      if (json && json.hits && Array.isArray(json.hits.hits)) {
+        list = json.hits.hits.map(function(h) { return h._source || h; }).filter(Boolean);
+      } else if (Array.isArray(json)) {
+        list = json;
+      } else if (json && Array.isArray(json.data)) {
+        list = json.data;
+      } else if (json && (json.data || json)) {
+        list = [json.data || json];
       }
-
-      render(list[0]);
+      if (!list.length) { showEmpty(); return; }
+      initWidget(list[0]);
     })
-    .catch(function (err) {
-      console.warn('[BocsWidget] Fetch error:', err.message);
-      showError('Could not load subscription box. Please try again later.');
-    });
+    .catch(function(err) { console.warn('[BocsWidget]', err.message); showError(err.message || undefined); });
+
 })();
 </script>
 
@@ -790,15 +1412,15 @@
       "type": "text",
       "id": "api_url",
       "label": "BOCS API URL",
-      "default": "/apps/customer-dashboard/api/bocs",
-      "info": "Shopify auto-injects shop, signature & timestamp. Returns array — widget shows first item."
+      "default": "/apps/customer-dashboard/api/customer-portal/store/bocs",
+      "info": "Returns a BOCS object. Widget uses mock data until this is connected."
     },
     {
       "type": "text",
       "id": "checkout_url",
       "label": "Checkout API URL",
-      "default": "/apps/customer-dashboard/api/checkout",
-      "info": "POSTs { items: [{ variantId, sellingPlanId, quantity }] } when the customer subscribes."
+      "default": "/apps/customer-dashboard/api/customer-portal/store/checkout",
+      "info": "POSTs { items: [{ variantId, sellingPlanId, quantity }] } on subscribe."
     }
   ]
 }

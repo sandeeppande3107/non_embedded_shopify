@@ -1,17 +1,17 @@
 
 name = "WinePik"
 client_id = "1135bdc0bbf54314787254ec4bb0fe8b"
-application_url = "http://localhost:3000/install"
+application_url = "https://bocs-turbo-1.vercel.app/install"
 embedded = false
 
 [auth]
-redirect_urls = ["https://localhost:3000/api/auth/callback","http://localhost:4016/dev/stores/shopify/install", "http://localhost:3000/shopify/callback"]
+redirect_urls = ["https://localhost:3000/api/auth/callback","http://localhost:4016/dev/stores/shopify/install", "http://localhost:3000/shopify/callback", "https://bocs-turbo-1.vercel.app/shopify/callback"]
 
 [access_scopes]
-scopes = "write_app_proxy,read_customers,read_orders,read_products,write_products,write_purchase_options,write_draft_orders,write_customers,write_orders,read_own_subscription_contracts,write_own_subscription_contracts,read_themes"
+scopes = "write_app_proxy,read_customers,read_orders,read_products,write_products,write_purchase_options,write_draft_orders,write_customers,write_orders,read_own_subscription_contracts,write_own_subscription_contracts,read_themes,unauthenticated_write_checkouts,unauthenticated_read_selling_plans,unauthenticated_read_product_listings"
 
 [app_proxy]
-url = "https://syntax-connectors-okay-calculations.trycloudflare.com"
+url = "https://bocs-turbo.vercel.app"
 prefix = "apps"
 subpath = "customer-dashboard"
 
