@@ -1,0 +1,130 @@
+{% comment %}
+  BOCS App Embed
+  Injects a Customer Dashboard link into a header menu.
+{% endcomment %}
+
+{%- assign is_logged_in = false -%}
+{%- if customer -%}
+  {%- assign is_logged_in = true -%}
+{%- endif -%}
+{%- assign item_id_prefix = 'bocs-dashboard-item-' | append: block.id -%}
+
+<script>
+  (function() {
+    var linkText = {{ block.settings.link_text | json }};
+    var dashboardUrl = '/apps/customer-dashboard';
+    var loggedInOnly = {{ block.settings.logged_in_only | json }};
+    var disableWhenLoggedOut = {{ block.settings.disable_when_logged_out | json }};
+    var isLoggedIn = {{ is_logged_in | json }};
+    var customSelector = {{ block.settings.header_menu_selector | json }};
+    var selectors = [];
+
+    if (customSelector) selectors.push(customSelector);
+    selectors.push('.header__inline-menu .list-menu--inline');
+    selectors.push('.menu-drawer__navigation .menu-drawer__menu');
+
+    if (loggedInOnly && !isLoggedIn) return;
+
+    function injectMenuLink(list, suffix) {
+      var itemId = {{ item_id_prefix | json }} + '-' + suffix;
+      if (document.getElementById(itemId)) return;
+
+      var item = document.createElement('li');
+      item.id = itemId;
+
+      var link = document.createElement('a');
+      link.textContent = linkText;
+      link.className = 'bocs-dashboard-link';
+
+      if (list.classList.contains('list-menu--inline')) {
+        link.className += ' header__menu-item list-menu__item link link--text focus-inset';
+      } else if (list.classList.contains('menu-drawer__menu')) {
+        link.className += ' menu-drawer__menu-item list-menu__item link link--text focus-inset';
+      }
+
+      if (disableWhenLoggedOut && !isLoggedIn) {
+        link.href = '#';
+        link.setAttribute('aria-disabled', 'true');
+        link.className += ' is-disabled';
+        link.addEventListener('click', function(event) {
+          event.preventDefault();
+        });
+      } else {
+        link.href = dashboardUrl;
+      }
+
+      item.appendChild(link);
+      list.appendChild(item);
+    }
+
+    function runInjection() {
+      var injected = false;
+      selectors.forEach(function(selector, index) {
+        var list = document.querySelector(selector);
+        if (list) {
+          injectMenuLink(list, String(index));
+          injected = true;
+        }
+      });
+      return injected;
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', runInjection);
+    } else {
+      runInjection();
+    }
+
+    var attempts = 0;
+    var timer = setInterval(function() {
+      attempts += 1;
+      if (runInjection() || attempts > 20) clearInterval(timer);
+    }, 250);
+  })();
+</script>
+
+<style>
+  .bocs-dashboard-link {
+    text-decoration: none;
+  }
+
+  .bocs-dashboard-link.is-disabled {
+    pointer-events: none;
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+</style>
+
+{% schema %}
+{
+  "name": "WinePik Dashboard Link",
+  "target": "body",
+  "settings": [
+    {
+      "type": "text",
+      "id": "link_text",
+      "label": "Link text",
+      "default": "Customer Dashboard"
+    },
+    {
+      "type": "text",
+      "id": "header_menu_selector",
+      "label": "Header menu CSS selector",
+      "default": "header ul",
+      "info": "Selector for the header menu list where the dashboard link should be added."
+    },
+    {
+      "type": "checkbox",
+      "id": "logged_in_only",
+      "label": "Show link only when customer is logged in",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "disable_when_logged_out",
+      "label": "Disable link when logged out (used only if not hidden)",
+      "default": false
+    }
+  ]
+}
+{% endschema %}
