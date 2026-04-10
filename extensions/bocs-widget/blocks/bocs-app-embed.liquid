@@ -28,6 +28,7 @@
     function injectMenuLink(list, suffix) {
       var itemId = {{ item_id_prefix | json }} + '-' + suffix;
       if (document.getElementById(itemId)) return;
+      if (list.querySelector('.bocs-dashboard-link')) return;
 
       var item = document.createElement('li');
       item.id = itemId;
@@ -59,9 +60,11 @@
 
     function runInjection() {
       var injected = false;
+      var processedLists = [];
       selectors.forEach(function(selector, index) {
         var list = document.querySelector(selector);
-        if (list) {
+        if (list && processedLists.indexOf(list) === -1) {
+          processedLists.push(list);
           injectMenuLink(list, String(index));
           injected = true;
         }
