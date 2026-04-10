@@ -15,6 +15,7 @@ const renderOrderAction = (root, api) => {
   a.style.borderRadius = '4px';
   a.style.textDecoration = 'none';
   a.style.color = '#111';
+  a.style.fontSize = 'clamp(0.875rem, 1.5vw, 1rem)';
 
   root.appendChild(a);
 };
@@ -35,7 +36,7 @@ const renderProfileBlock = (root, api) => {
   const heading = document.createElement('p');
   heading.innerText = 'MANAGE SUBSCRIPTIONS';
   heading.style.cssText = `
-    font-size: 0.7rem;
+    font-size: clamp(0.85rem, 1.5vw, 1rem);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -46,7 +47,7 @@ const renderProfileBlock = (root, api) => {
   const sub = document.createElement('p');
   sub.innerText = 'View and manage your subscription boxes, delivery frequency, and billing.';
   sub.style.cssText = `
-    font-size: 0.875rem;
+    font-size: clamp(1rem, 2vw, 1.125rem);
     color: #555;
     font-style: italic;
     margin: 0 0 16px;
@@ -61,7 +62,7 @@ const renderProfileBlock = (root, api) => {
     padding: 10px 24px;
     background: #5c4a3a;
     color: #fff;
-    font-size: 0.72rem;
+    font-size: clamp(0.875rem, 1.5vw, 1rem);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;

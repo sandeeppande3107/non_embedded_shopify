@@ -1,7 +1,19 @@
 {
   "blocks": {
+    "customer_dashboard_link": {
+      "name": "Customer Dashboard Link",
+      "settings": {
+        "link_text": {
+          "label": "Link Label"
+        },
+        "logged_in_only": {
+          "label": "Show to logged-in customers only",
+          "info": "When enabled, guests will not see this link."
+        }
+      }
+    },
     "bocs_widget": {
-      "name": "BOCS Widget",
+      "name": "Club Builder Widget",
       "settings": {
         "api_url": {
           "label": "API Endpoint URL",
@@ -55,30 +67,6 @@
         "section_padding": {
           "label": "Section Vertical Padding (px)"
         }
-      }
-    },
-    "customer_dashboard_link": {
-      "name": "Customer Dashboard Link",
-      "settings": {
-        "dashboard_url": {
-          "label": "Dashboard URL",
-          "info": "The URL customers are sent to when they click the button."
-        },
-        "label": { "label": "Eyebrow Label" },
-        "description": { "label": "Description" },
-        "button_text": { "label": "Button Text" },
-        "font_family": {
-          "label": "Font Family",
-          "options__1": { "label": "Serif (Georgia)" },
-          "options__2": { "label": "Theme default" },
-          "options__3": { "label": "Sans-serif" }
-        },
-        "bg_color": { "label": "Background" },
-        "border_color": { "label": "Border" },
-        "muted_color": { "label": "Text Color" },
-        "btn_bg_color": { "label": "Button Background" },
-        "btn_text_color": { "label": "Button Text" },
-        "padding": { "label": "Vertical Padding (px)" }
       }
     }
   }
